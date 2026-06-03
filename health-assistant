@@ -1,0 +1,2408 @@
+from kivy.app import App
+from kivy.lang import Builder
+from kivy.uix.screenmanager import ScreenManager, Screen
+from kivy.clock import Clock
+from kivy.metrics import dp
+import threading
+import speech_recognition as sr
+import pyttsx3
+import webbrowser
+import difflib
+import traceback
+
+tts_engine = pyttsx3.init()
+tts_lock = threading.Lock()
+
+def speak(text):
+    def run():
+        try:
+            with tts_lock:
+                tts_engine.say(text)
+                tts_engine.runAndWait()
+        except Exception as e:
+            print("TTS Error:", e)
+    threading.Thread(target=run, daemon=True).start()
+
+def listen():
+    recognizer = sr.Recognizer()
+    with sr.Microphone() as source:
+        try:
+            recognizer.adjust_for_ambient_noise(source, duration=1)
+            audio = recognizer.listen(source, timeout=5)
+            text = recognizer.recognize_google(audio)
+            return text
+        except Exception as e:
+            print("Voice Recognition Error:", e)
+            traceback.print_exc()
+            return None
+SYMPTOM_DB = {
+    'headache': {
+        'advice': 'Drink water, rest, and avoid screens. Take paracetamol if needed.',
+        'medicines': ['paracetamol']
+    },
+    'fever': {
+        'advice': 'Rest, hydrate well, Take either paracetamol or ibuorfen. If persistent, see a doctor.',
+        'medicines': ['paracetamol', 'ibuprofen']
+    },
+    'cold': {
+        'advice': 'Stay warm, drink fluids, take steam. Use antihistamines if needed.',
+        'medicines': ['cetirizine']
+    },
+    'cough': {
+        'advice': 'Drink warm water with honey. Use cough syrup if dry or persistent.',
+        'medicines': []
+    },
+    'stomach ache': {
+        'advice': 'Avoid spicy food, drink warm water. Use antacids if needed.',
+        'medicines': ['digene']
+    },
+    'vomiting': {
+        'advice': 'Stay hydrated with ORS. Avoid solid food. If severe, consult a doctor.',
+        'medicines': []
+    },
+    'sore throat': {
+        'advice': 'Gargle with warm salt water, stay hydrated, and rest your voice. Take either paracetamol or cetirizine.',
+        'medicines': ['paracetamol', 'cetirizine']
+    },
+    'diarrhea': {
+        'advice': 'Stay hydrated with ORS. Avoid dairy and fatty foods. See doctor if persistent.',
+        'medicines': ['loperamide']
+    },
+    'constipation': {
+        'advice': 'Increase fiber and water intake. Exercise regularly.',
+        'medicines': ['docusate']
+    },
+    'allergy': {
+        'advice': 'Avoid allergens. Take antihistamines as needed. Either cetirizine or loratadine.',
+        'medicines': ['cetirizine', 'loratadine']
+    },
+    'muscle pain': {
+        'advice': 'Rest, apply heat or cold packs. Take painkillers if needed. Either ibuprofen or paracetamol.',
+        'medicines': ['ibuprofen', 'paracetamol']
+    },
+    'back pain': {
+        'advice': 'Maintain posture, apply heat packs, and take mild painkillers.',
+        'medicines': ['ibuprofen']
+    },
+    'acidity': {
+        'advice': 'Avoid spicy and oily food, eat smaller meals, use antacids. Either digene or ranitidine.',
+        'medicines': ['digene', 'ranitidine']
+    },
+    'insomnia': {
+        'advice': 'Maintain sleep hygiene, avoid caffeine, consult doctor if chronic.',
+        'medicines': ['melatonin']
+    },
+    'anxiety': {
+        'advice': 'Practice relaxation techniques, avoid caffeine, seek counseling.',
+        'medicines': ['diazepam']
+    },
+    'depression': {
+        'advice': 'Consult a healthcare professional. Engage in therapy and support groups.',
+        'medicines': ['sertraline']
+    },
+    'rash': {
+        'advice': 'Avoid irritants, keep area clean and dry. Use antihistamines for itching. Cetirizine for internal allergy relief, cream for local treatment — often both are used.',
+        'medicines': ['cetirizine', 'hydrocortisone cream']
+    },
+    'joint pain': {
+        'advice': 'Rest joints, apply cold/heat, take anti-inflammatory medicines.',
+        'medicines': ['ibuprofen']
+    },
+    'ear pain': {
+        'advice': 'Avoid water in ear, use warm compress, consult doctor if severe.',
+        'medicines': ['paracetamol']
+    },
+    'eye irritation': {
+        'advice': 'Avoid rubbing eyes, use lubricating eye drops, see doctor if persists.',
+        'medicines': ['artificial tears']
+    },
+    'burns': {
+        'advice': 'Cool the burn with running water for 10-20 minutes. Avoid applying creams on severe burns.',
+        'medicines': ['silver sulfadiazine']
+    },
+    'sprain': {
+        'advice': 'Rest, ice, compression, and elevation (RICE). Take painkillers if needed.',
+        'medicines': ['ibuprofen']
+    },
+    'nasal congestion': {
+        'advice': 'Use saline nasal spray and steam inhalation.',
+        'medicines': ['oxymetazoline']
+    },
+    'ear infection': {
+        'advice': 'Keep ear dry, avoid water, use warm compress. See doctor if severe.',
+        'medicines': ['amoxicillin']
+    },
+    'toothache': {
+        'advice': 'Rinse mouth with warm salt water, avoid cold food, see dentist. Take either paracetamol or ibuprofen.',
+        'medicines': ['paracetamol', 'ibuprofen']
+    },
+    'acid reflux': {
+        'advice': 'Avoid fatty/spicy foods, don’t lie down after meals, eat smaller meals.',
+        'medicines': ['omeprazole']
+    },
+    'diabetes': {
+        'advice': 'Maintain healthy diet, monitor blood sugar, follow doctor’s advice.',
+        'medicines': ['metformin']
+    },
+    'high blood pressure': {
+        'advice': 'Reduce salt intake, exercise, monitor blood pressure regularly.',
+        'medicines': ['amlodipine']
+    },
+    'asthma': {
+        'advice': 'Avoid triggers, use inhaler as prescribed. Salbutamol for immediate relief, fluticasone for maintenance.',
+        'medicines': ['salbutamol', 'fluticasone']
+    },
+    'allergic rhinitis': {
+        'advice': 'Avoid allergens, take antihistamines.',
+        'medicines': ['loratadine']
+    },
+    'eczema': {
+        'advice': 'Keep skin moisturized, avoid irritants.',
+        'medicines': ['hydrocortisone cream']
+    },
+    'dehydration': {
+        'advice': 'Drink plenty of fluids, use oral rehydration salts.',
+        'medicines': ['ORS']
+    },
+    'urinary tract infection': {
+        'advice': 'Drink plenty of water, see doctor for antibiotics.',
+        'medicines': ['nitrofurantoin']
+    },
+    'anemia': {
+        'advice': 'Eat iron-rich foods, take supplements as advised.',
+        'medicines': ['ferrous sulfate']
+    },
+    'cold sores': {
+        'advice': 'Avoid touching sores, apply antiviral creams.',
+        'medicines': ['acyclovir']
+    },
+    'motion sickness': {
+        'advice': 'Sit facing forward, avoid heavy meals before travel.',
+        'medicines': ['meclizine']
+    },
+    'menstrual cramps': {
+        'advice': 'Use heat pads, rest, take painkillers if needed. Either ibuprofen or paracetamol.',
+        'medicines': ['ibuprofen', 'paracetamol']
+    },
+    'dry mouth': {
+        'advice': 'Drink water frequently, chew sugar-free gum, avoid caffeine and alcohol.',
+        'medicines': []
+    },
+    'hiccups': {
+        'advice': 'Drink cold water slowly, hold your breath, or swallow a spoon of sugar.',
+        'medicines': []
+    },
+    'sneezing': {
+        'advice': 'Stay away from dust or allergens. Take an antihistamine if needed. Either certirizine or loratadine.',
+        'medicines': ['cetirizine', 'loratadine']
+    },
+    'swelling': {
+        'advice': 'Elevate the area, apply ice packs, and avoid exertion.',
+        'medicines': []
+    },
+    'difficulty breathing': {
+        'advice': 'Sit upright, stay calm, and use an inhaler if prescribed. Seek emergency care if severe.',
+        'medicines': ['salbutamol']
+    },
+    'palpitations': {
+        'advice': 'Take deep breaths, reduce caffeine/stress. Seek medical help if frequent.',
+        'medicines': []
+    },
+    'blurred vision': {
+        'advice': 'Rest eyes, reduce screen time. If sudden or severe, see a doctor immediately.',
+        'medicines': []
+    },
+    'frequent urination': {
+        'advice': 'Stay hydrated, avoid caffeine. If burning sensation or urgency, consult a doctor.',
+        'medicines': []
+    },
+    'urine burning': {
+        'advice': 'Drink plenty of water, cranberry juice. May require medical treatment for infection.',
+        'medicines': ['nitrofurantoin']
+    },
+    'hair fall': {
+        'advice': 'Eat a balanced diet, reduce stress, use mild shampoos. Check for vitamin deficiencies.',
+        'medicines': []
+    },
+    'skin dryness': {
+        'advice': 'Moisturize regularly, avoid hot showers, drink plenty of fluids.',
+        'medicines': ['moisturizer']
+    },
+    'cracked lips': {
+        'advice': 'Use petroleum jelly or lip balm. Stay hydrated and avoid licking lips.',
+        'medicines': ['lip balm']
+    },
+    'loss of appetite': {
+        'advice': 'Eat small meals, stay hydrated, try ginger or lemon water. Monitor for underlying illness.',
+        'medicines': []
+    },
+    'sweating excessively': {
+        'advice': 'Stay in cool environments, wear breathable clothes. Stay hydrated.',
+        'medicines': []
+    },
+    'ringing in ears': {
+        'advice': 'Avoid loud noises, manage stress. Seek help if persistent (tinnitus).',
+        'medicines': []
+    },
+    'nose blockage': {
+        'advice': 'Use saline nasal spray, steam inhalation, and stay hydrated.',
+        'medicines': ['saline nasal spray']
+    },
+    'difficulty sleeping': {
+        'advice': 'Avoid caffeine late in the day, limit screen time, and maintain a sleep schedule.',
+        'medicines': ['melatonin']
+    },
+    'bad breath': {
+        'advice': 'Brush tongue, drink water, and maintain good oral hygiene. Avoid strong-smelling foods.',
+        'medicines': []
+    },
+    'bronchitis': {
+        'advice': 'Rest, stay hydrated, use a humidifier. Both medicines may be needed, depending on whether the infection is bacterial or not.',
+        'medicines': ['dextromethorphan', 'amoxicillin']
+    },
+    'tonsillitis': {
+        'advice': 'Gargle warm salt water, rest voice, stay hydrated. Both medicines can be important — one for symptom relief and one for infection treatment.',
+        'medicines': ['paracetamol', 'amoxicillin']
+    },
+    'meningitis': {
+        'advice': 'Seek immediate medical attention. Do not delay treatment.',
+        'medicines': []
+    },
+    'pneumonia': {
+        'advice': 'See doctor immediately, rest and hydrate well. Both medicines are important and serve different roles—both are generally needed.',
+        'medicines': ['amoxicillin', 'paracetamol']
+    },
+    'gout': {
+        'advice': 'Avoid alcohol and purine-rich foods, stay hydrated. Use anti-inflammatory medicines. One medicine is enough, not both at the same time.',
+        'medicines': ['ibuprofen', 'colchicine']
+    },
+    'hypertension crisis': {
+        'advice': 'Seek emergency care immediately.',
+        'medicines': []
+    },
+    'hypotension': {
+        'advice': 'Increase salt and water intake, avoid sudden standing.',
+        'medicines': []
+    },
+    'hypothyroidism': {
+        'advice': 'Take thyroid hormone replacement as prescribed.',
+        'medicines': ['levothyroxine']
+    },
+    'migraine': {
+        'advice': 'Rest in a quiet dark room, avoid triggers. Take migraine-specific painkillers. Either sumatriptan or paracetamol.',
+        'medicines': ['sumatriptan', 'paracetamol']
+    },
+    'anaphylaxis': {
+        'advice': 'Seek emergency medical help immediately. Use epinephrine injector if available.',
+        'medicines': ['epinephrine']
+    },
+    'deep vein thrombosis': {
+        'advice': 'Seek medical advice urgently. Avoid prolonged immobility.',
+        'medicines': ['warfarin']
+    },
+    'stroke': {
+        'advice': 'Seek emergency care immediately.',
+        'medicines': []
+    },
+    'seizure': {
+        'advice': 'Protect from injury, do not restrain. Seek medical help.',
+        'medicines': ['diazepam']
+    },
+    'dengue fever': {
+        'advice': 'Rest, hydrate, avoid aspirin. Seek medical attention.',
+        'medicines': ['paracetamol']
+    },
+    'cholesterol': {
+        'advice': 'Maintain healthy diet, exercise regularly.',
+        'medicines': ['atorvastatin']
+    },
+    'eczema flare': {
+        'advice': 'Moisturize skin regularly, avoid irritants.',
+        'medicines': ['hydrocortisone cream']
+    },
+    'psoriasis': {
+        'advice': 'Keep skin moisturized, avoid triggers. Consult dermatologist.',
+        'medicines': ['calcipotriol']
+    },
+    'pancreatitis': {
+        'advice': 'Avoid alcohol and fatty foods. Seek medical treatment.',
+        'medicines': []
+    },
+    'hepatitis': {
+        'advice': 'Rest, avoid alcohol and hepatotoxic drugs.',
+        'medicines': []
+    },
+    'appendicitis': {
+        'advice': 'Seek emergency medical care immediately.',
+        'medicines': []
+    },
+    'eczema infected': {
+        'advice': 'Keep area clean, apply antibiotics if infected.',
+        'medicines': ['mupirocin']
+    },
+    'vitamin d deficiency': {
+        'advice': 'Take vitamin D supplements and get sunlight exposure.',
+        'medicines': ['vitamin d']
+    },
+    'iron deficiency anemia': {
+        'advice': 'Eat iron-rich foods, take iron supplements as prescribed.',
+        'medicines': ['ferrous sulfate']
+    },
+    'otitis media': {
+        'advice': 'Keep ear dry, use warm compress. See doctor if pain persists.',
+        'medicines': ['amoxicillin']
+    },
+    'eczema herpeticum': {
+        'advice': 'Seek medical attention immediately.',
+        'medicines': ['acyclovir']
+    },
+    'hyperlipidemia': {
+        'advice': 'Healthy diet, exercise, and lipid-lowering medication if prescribed.',
+        'medicines': ['atorvastatin']
+    },
+    'candidiasis': {
+        'advice': 'Keep area dry, use antifungal creams.',
+        'medicines': ['clotrimazole']
+    },
+    'depression severe': {
+        'advice': 'Consult psychiatrist, psychotherapy, medication may be needed. Take either sertraline or fluoxetine.',
+        'medicines': ['sertraline', 'fluoxetine']
+    },
+    'anxiety severe': {
+        'advice': 'Seek counseling, may require medications. Take either diazepam or alprazolam.',
+        'medicines': ['diazepam', 'alprazolam']
+    },
+    'osteoporosis': {
+        'advice': 'Calcium and vitamin D intake, weight-bearing exercises.',
+        'medicines': ['alendronate']
+    },
+    'bronchial asthma attack': {
+        'advice': 'Use inhaler immediately, seek emergency care if severe.',
+        'medicines': ['salbutamol']
+    },
+    'eczema dry': {
+        'advice': 'Regular moisturizing, avoid hot water.',
+        'medicines': ['moisturizer']
+    },
+    'food poisoning': {
+        'advice': 'Stay hydrated, rest, avoid solid food initially.',
+        'medicines': ['loperamide']
+    },
+    'conjunctivitis': {
+        'advice': 'Avoid touching eyes, maintain hygiene. Use eye drops.',
+        'medicines': ['chloramphenicol eye drops']
+    },
+    'psoriasis plaque': {
+        'advice': 'Moisturize, avoid triggers, consult dermatologist.',
+        'medicines': ['calcipotriol']
+    },
+    'hypoglycemia': {
+        'advice': 'Consume fast-acting carbs immediately (sugar, juice).',
+        'medicines': ['glucose tablets']
+    },
+    'varicose veins': {
+        'advice': 'Elevate legs, exercise, wear compression stockings.',
+        'medicines': []
+    },
+    'eczema infected bacterial': {
+        'advice': 'Keep area clean, use topical antibiotics.',
+        'medicines': ['mupirocin']
+    },
+    'common cold severe': {
+        'advice': 'Rest, hydrate, use decongestants if needed.',
+        'medicines': ['pseudoephedrine']
+    },
+    'insomnia chronic': {
+        'advice': 'Sleep hygiene, consult doctor if persistent.',
+        'medicines': ['zolpidem']
+    },
+    'cystitis': {
+        'advice': 'Drink plenty of water, see doctor if symptoms persist.',
+        'medicines': ['nitrofurantoin']
+    },
+    'eczema mild': {
+        'advice': 'Moisturize regularly, avoid irritants.',
+        'medicines': ['moisturizer']
+    },
+    'otitis externa': {
+        'advice': 'Keep ear dry, use antibiotic ear drops.',
+        'medicines': ['ciprofloxacin ear drops']
+    },
+    'head lice': {
+        'advice': 'Use medicated shampoos, comb out nits.',
+        'medicines': ['permethrin shampoo']
+    },
+    'ringworm': {
+        'advice': 'Keep area clean and dry, use antifungal creams.',
+        'medicines': ['clotrimazole']
+    },
+    'hypokalemia': {
+        'advice': 'Increase potassium intake through diet or supplements.',
+        'medicines': ['potassium chloride']
+    },
+    'hyperkalemia': {
+        'advice': 'Avoid high potassium foods, seek urgent medical care if severe.',
+        'medicines': []
+    },
+    'bronchiectasis': {
+        'advice': 'Chest physiotherapy, antibiotics if infected.',
+        'medicines': ['amoxicillin']
+    },
+    'bronchitis chronic': {
+        'advice': 'Avoid smoking, stay hydrated, use prescribed inhalers and cough suppressants. Both tiotropium and dextromethorphan can be taken together as they complement each other .',
+        'medicines': ['tiotropium', 'dextromethorphan']
+    },
+    'cystic fibrosis': {
+        'advice': 'Follow respiratory therapy, maintain nutrition, use prescribed antibiotics. Both azithromycin and dornase alfa are usually needed together.',
+        'medicines': ['azithromycin', 'dornase alfa']
+    },
+    'glaucoma': {
+        'advice': 'Use prescribed eye drops regularly, avoid heavy lifting.',
+        'medicines': ['timolol eye drops']
+    },
+    'urinary incontinence': {
+        'advice': 'Pelvic exercises, bladder training, medications if prescribed.',
+        'medicines': ['oxybutynin']
+    },
+    'hypothyroidism congenital': {
+        'advice': 'Early hormone replacement therapy as prescribed by doctor.',
+        'medicines': ['levothyroxine']
+    },
+    'migraine chronic': {
+        'advice': 'Avoid triggers, maintain sleep hygiene, take preventive medication as prescribed. Topiramate is a daily preventive, sumatriptan is taken only during migraine attacks not take both at the same time in the same way.',
+        'medicines': ['topiramate', 'sumatriptan']
+    },
+    'chickenpox': {
+        'advice': 'Avoid scratching, keep skin clean, use calamine lotion.',
+        'medicines': ['acyclovir']
+    },
+    'shingles': {
+        'advice': 'Pain relief, keep rash clean and dry, antiviral medication.',
+        'medicines': ['acyclovir']
+    },
+    'psoriatic arthritis': {
+        'advice': 'Exercise regularly, take prescribed anti-inflammatory medication. Methotrexate for long-term control, ibuprofen for managing pain and inflammation as needed both medicines are usually needed together.',
+        'medicines': ['methotrexate', 'ibuprofen']
+    },
+    'rheumatoid arthritis': {
+        'advice': 'Physiotherapy, use disease-modifying drugs as prescribed. Both methotrexate and prednisoloneare typically used in combination, with methotrexate as the main treatment and prednisolone for flare management.',
+        'medicines': ['methotrexate', 'prednisolone']
+    },
+    'systemic lupus erythematosus': {
+        'advice': 'Avoid sunlight, take immunosuppressants under doctor supervision.  Both hydroxychloroquine and prednisolone are often needed — hydroxychloroquine for ongoing disease control and prednisolone for managing flare-ups or active inflammation.',
+        'medicines': ['hydroxychloroquine', 'prednisolone']
+    },
+    'chronic kidney disease': {
+        'advice': 'Maintain diet, control blood pressure, take prescribed medication. Both enalapril and furosemide serve different purposes and are usually taken together if prescribed — enalapril for kidney protection and blood pressure control, furosemide for managing fluid retention.',
+        'medicines': ['enalapril', 'furosemide']
+    },
+    'anaphylactic shock': {
+        'advice': 'Immediate emergency care, use epinephrine injector.',
+        'medicines': ['epinephrine']
+    },
+    'tuberculosis': {
+        'advice': 'Complete full course of antibiotics as prescribed. Both isoniazid and rifampicinare necessary together as part of the standard TB treatment regimen.',
+        'medicines': ['isoniazid', 'rifampicin']
+    },
+    'gastroesophageal reflux disease (GERD)': {
+        'advice': 'Avoid fatty meals, elevate head while sleeping, take antacids or proton pump inhibitors. Either omeprazole or ranitidine.',
+        'medicines': ['omeprazole', 'ranitidine']
+    },
+    'peptic ulcer': {
+        'advice': 'Avoid NSAIDs, eat small meals, take prescribed medications. Both omeprazole and amoxicillin are needed together if the ulcer is due to H. pylori infection — acid suppression plus antibiotic treatment.',
+        'medicines': ['omeprazole', 'amoxicillin']
+    },
+    'deep vein thrombosis chronic': {
+        'advice': 'Regular exercise, compression stockings, take anticoagulants.',
+        'medicines': ['warfarin']
+    },
+    'hyperthyroidism toxic': {
+        'advice': 'Medication adherence, regular monitoring. Both methimazole and propranolol are needed together—methimazole for the underlying condition, propranolol for symptom control.',
+        'medicines': ['methimazole', 'propranolol']
+    },
+    'hypoglycemia recurrent': {
+        'advice': 'Frequent small meals, carry glucose tablets.',
+        'medicines': ['glucose tablets']
+    },
+    'hepatitis b': {
+        'advice': 'Avoid alcohol, take antivirals as prescribed.',
+        'medicines': ['entecavir']
+    },
+    'iron overload': {
+        'advice': 'Regular phlebotomy, avoid iron supplements.',
+        'medicines': ['deferoxamine']
+    },
+    'acne vulgaris': {
+        'advice': 'Keep skin clean, avoid oily cosmetics, use topical medications. Using both benzoyl peroxide and clindamycin topical together is common to target bacteria and inflammation for better results.',
+        'medicines': ['benzoyl peroxide', 'clindamycin topical']
+    },
+    'eczema severe': {
+        'advice': 'Use prescribed corticosteroids, moisturize frequently. Both hydrocortisone cream and prednisolone may be needed, depending on severity; topical for mild/local, oral/systemic if severe.',
+        'medicines': ['hydrocortisone cream', 'prednisolone']
+    },
+    'otitis media chronic': {
+        'advice': 'Maintain ear hygiene, use prescribed antibiotics. Often both amoxicillin and ciprofloxacin ear dropsare used together to ensure systemic and local infection control',
+        'medicines': ['amoxicillin', 'ciprofloxacin ear drops']
+    },
+    'sinusitis chronic': {
+        'advice': 'Nasal irrigation, avoid allergens, take prescribed antibiotics. Both amoxicillin and pseudoephedrine are used together but serve different purposes (antibiotic + symptom relief).',
+        'medicines': ['amoxicillin', 'pseudoephedrine']
+    },
+    'gout chronic': {
+        'advice': 'Avoid purine-rich foods, take urate-lowering therapy. Both allopurinol and colchicineare needed but for different phases — preventive (allopurinol) and acute treatment (colchicine).',
+        'medicines': ['allopurinol', 'colchicine']
+    },
+    'eczema infantile': {
+        'advice': 'Use gentle moisturizers, avoid irritants. Both moisturizer and hydrocortisone creamshould be used together—moisturizer regularly, corticosteroid as needed.',
+        'medicines': ['moisturizer', 'hydrocortisone cream']
+    },
+    'herpes simplex': {
+        'advice': 'Avoid touching lesions, use antiviral medications.',
+        'medicines': ['acyclovir']
+    },
+    'varicella zoster': {
+        'advice': 'Rest, maintain hydration, use antiviral therapy if severe.',
+        'medicines': ['acyclovir']
+    },
+    'bronchiectasis chronic': {
+        'advice': 'Regular chest physiotherapy, use antibiotics during flare-ups. Take either amoxicillin or azithronmycin.',
+        'medicines': ['amoxicillin', 'azithromycin']
+    },
+    'leg pain': {
+        'advice': 'Rest, elevate leg, apply ice or heat packs. Stretch gently and avoid overuse.',
+        'medicines': ['ibuprofen']
+    },
+    'hand pain': {
+        'advice': 'Rest hand, use cold or warm compress. Avoid repetitive strain.',
+        'medicines': ['ibuprofen']
+    },
+    'knee pain': {
+        'advice': 'Rest, use ice, and elevate. Avoid stairs and impact activities.',
+        'medicines': ['ibuprofen']
+    },
+    'neck pain': {
+        'advice': 'Use proper posture, apply warm compress, rest neck. Avoid sudden movements.',
+        'medicines': ['paracetamol']
+    },
+    'shoulder pain': {
+        'advice': 'Rest, apply ice/heat, perform gentle stretches.',
+        'medicines': ['ibuprofen']
+    },
+    'hip pain': {
+        'advice': 'Rest, avoid prolonged standing. Apply cold or heat as needed.',
+        'medicines': ['ibuprofen']
+    },
+    'elbow pain': {
+        'advice': 'Rest elbow, use a brace if needed. Apply ice after activity.',
+        'medicines': ['ibuprofen']
+    },
+    'wrist pain': {
+        'advice': 'Avoid repetitive strain, use wrist support, and rest.',
+        'medicines': ['ibuprofen']
+    },
+    'ankle pain': {
+        'advice': 'Elevate, apply ice, avoid putting weight on the ankle.',
+        'medicines': ['ibuprofen']
+    },
+    'heel pain': {
+        'advice': 'Rest foot, wear cushioned shoes, and stretch calves.',
+        'medicines': ['ibuprofen']
+    },
+    'foot pain': {
+        'advice': 'Rest, soak in warm water, wear supportive footwear.',
+        'medicines': ['ibuprofen']
+    },
+    'jaw pain': {
+        'advice': 'Avoid chewing hard foods, apply warm compress. See dentist if persists.',
+        'medicines': ['paracetamol']
+    },
+    'thigh pain': {
+        'advice': 'Rest, stretch gently, use warm compress.',
+        'medicines': ['ibuprofen']
+    },
+    'calf pain': {
+        'advice': 'Elevate leg, massage gently, avoid overexertion.',
+        'medicines': ['ibuprofen']
+    },
+    'groin pain': {
+        'advice': 'Avoid strenuous activity, use ice packs, rest well.',
+        'medicines': ['ibuprofen']
+    },
+    'tailbone pain': {
+        'advice': 'Avoid sitting long, use cushion, apply warm compress.',
+        'medicines': ['paracetamol']
+    },
+    'rib pain': {
+        'advice': 'Rest, avoid heavy lifting, take deep breaths gently.',
+        'medicines': ['ibuprofen']
+    },
+    'abdominal pain': {
+        'advice': 'Avoid heavy meals, apply warm compress, rest.',
+        'medicines': ['paracetamol']
+    },
+    'pelvic pain': {
+        'advice': 'Apply heat, avoid prolonged sitting, consult doctor if persistent.',
+        'medicines': ['ibuprofen']
+    },
+    'chest pain mild': {
+        'advice': 'Rest, avoid exertion. If uncertain or severe, seek emergency care.',
+        'medicines': ['aspirin']
+    },
+    'eye pain': {
+        'advice': 'Avoid screens, use lubricating drops, consult doctor if it worsens.',
+        'medicines': ['artificial tears']
+    },
+    'temple pain': {
+        'advice': 'Rest in dark room, avoid triggers, reduce stress.',
+        'medicines': ['paracetamol']
+    },
+    'pain during urination': {
+        'advice': 'Drink water, avoid caffeine and spicy foods. May indicate infection.',
+        'medicines': ['nitrofurantoin']
+    },
+    'painful periods': {
+        'advice': 'Use heating pad, stay hydrated, rest. Avoid caffeine.',
+        'medicines': ['ibuprofen', 'paracetamol']
+    },
+    'painful swallowing': {
+        'advice': 'Gargle warm salt water, eat soft food. Avoid irritants.',
+        'medicines': ['paracetamol']
+    },
+    'testicular pain': {
+        'advice': 'Avoid tight clothing, apply ice gently, seek medical advice if severe.',
+        'medicines': ['paracetamol']
+    },
+    'scalp pain': {
+        'advice': 'Use gentle shampoo, avoid tight hairstyles, massage gently.',
+        'medicines': []
+    },
+    'breast pain': {
+        'advice': 'Wear supportive bra, reduce caffeine, use warm compress.',
+        'medicines': ['ibuprofen']
+    },
+    'finger pain': {
+        'advice': 'Rest finger, apply ice, avoid overuse.',
+        'medicines': ['ibuprofen']
+    },
+    'toe pain': {
+        'advice': 'Wear comfortable shoes, rest, apply ice if swollen.',
+        'medicines': ['ibuprofen']
+    },
+    'low bp': {
+        'advice': 'Sit or lie down immediately. Drink water or electrolyte fluids. Avoid sudden standing. Eat small, frequent meals.',
+        'medicines': []
+    },
+    'high bp': {
+        'advice': 'Reduce salt intake, exercise regularly, avoid stress. Monitor blood pressure often and consult doctor.',
+        'medicines': ['amlodipine', 'lisinopril']
+    },
+    'low sugar': {
+        'advice': 'Consume fast-acting carbs like glucose tablets, fruit juice, or candy. Monitor blood sugar regularly.',
+        'medicines': []
+    },
+    'high sugar': {
+        'advice': 'Avoid sugary foods and drinks, stay hydrated, monitor blood glucose frequently, and follow diabetic management plan.',
+        'medicines': ['metformin', 'insulin']
+    }
+}
+
+MEDICINE_DB = {
+    'paracetamol': {
+        'description': 'Used for fever and mild pain.',
+        'adult_dose': '500–1000 mg every 4–6 hours (max 4000 mg/day).',
+        'child_dose': '~15 mg per kg of body weight every 4–6 hours (max 60 mg per kg of body weight per day).',
+    },
+    'ibuprofen': {
+        'description': 'Anti-inflammatory. Take with food.',
+        'adult_dose': '200–400 mg every 4–6 hours (max 1200 mg/day Over The Counter (OTC)).',
+        'child_dose': '5–10 mg per kg of body weight every 6–8 hours (max 40 mg per kg of body weight per day).',
+    },
+    'cetirizine': {
+        'description': 'Antihistamine for allergy and cold.',
+        'adult_dose': '10 mg once a day.',
+        'child_dose': '5 mg once a day (2–6 years).',
+    },
+    'dolo 650': {
+        'description': 'Brand of paracetamol. Used for fever and pain relief.',
+        'adult_dose': '650 mg every 4–6 hours (max 4000 mg/day).',
+        'child_dose': '~15 mg per kg of body weight every 4–6 hours (max 60 mg per kg of body weight per day).',
+    },
+    'digene': {
+        'description': 'Used for acidity and stomach gas. Take after meals.',
+        'adult_dose': '1-2 tablets after meals as needed.',
+        'child_dose': 'Consult a pediatrician before use.',
+    },
+    'loperamide': {
+        'description': 'Used to reduce diarrhea.',
+        'adult_dose': '4 mg initially, then 2 mg after each loose stool (max 16 mg/day).',
+        'child_dose': 'Not recommended for children under 2 years.',
+    },
+    'docusate': {
+        'description': 'Stool softener used in constipation.',
+        'adult_dose': '50-400 mg daily in divided doses.',
+        'child_dose': 'Consult pediatrician.',
+    },
+    'loratadine': {
+        'description': 'Non-sedating antihistamine for allergies.',
+        'adult_dose': '10 mg once daily.',
+        'child_dose': '5 mg once daily (2-6 years).',
+    },
+    'ranitidine': {
+        'description': 'Reduces stomach acid (note: check availability as withdrawn in some countries).',
+        'adult_dose': '150 mg twice daily.',
+        'child_dose': 'Consult doctor.',
+    },
+    'melatonin': {
+        'description': 'Used to regulate sleep cycles.',
+        'adult_dose': '1-5 mg 30 minutes before bedtime.',
+        'child_dose': 'Consult doctor.',
+    },
+    'diazepam': {
+        'description': 'Anxiety relief and muscle relaxant.',
+        'adult_dose': '2-10 mg 2-4 times daily.',
+        'child_dose': 'Consult doctor.',
+    },
+    'sertraline': {
+        'description': 'Antidepressant (SSRI).',
+        'adult_dose': '50-200 mg daily.',
+        'child_dose': 'Only under medical supervision.',
+    },
+    'hydrocortisone cream': {
+        'description': 'Topical steroid for skin inflammation and rash.',
+        'adult_dose': 'Apply thin layer 1-2 times daily.',
+        'child_dose': 'Use under doctor’s advice.',
+    },
+    'artificial tears': {
+        'description': 'Lubricating eye drops for dryness or irritation.',
+        'adult_dose': '1-2 drops as needed.',
+        'child_dose': 'Consult doctor.',
+    },
+    'silver sulfadiazine': {
+        'description': 'Topical antibiotic cream for burns.',
+        'adult_dose': 'Apply once or twice daily.',
+        'child_dose': 'Consult doctor.',
+    },
+    'oxymetazoline': {
+        'description': 'Nasal decongestant spray.',
+        'adult_dose': '2-3 sprays in each nostril twice daily (max 3 days).',
+        'child_dose': 'Use only under medical supervision.',
+    },
+    'amoxicillin': {
+        'description': 'Broad-spectrum antibiotic.',
+        'adult_dose': '500 mg every 8 hours.',
+        'child_dose': '20-40 mg per kg of body weight per day in divided doses.',
+    },
+    'omeprazole': {
+        'description': 'Proton pump inhibitor for acid reflux.',
+        'adult_dose': '20 mg once daily before meal.',
+        'child_dose': 'Consult doctor.',
+    },
+    'lactulose': {
+        'description': 'Laxative used for constipation.',
+        'adult_dose': '15-30 ml daily.',
+        'child_dose': '5-10 ml daily (adjust as needed).',
+    },
+    'metformin': {
+        'description': 'Oral hypoglycemic agent for diabetes.',
+        'adult_dose': '500-2000 mg daily in divided doses.',
+        'child_dose': 'Use only under medical supervision.',
+    },
+    'amlodipine': {
+        'description': 'Calcium channel blocker for hypertension.',
+        'adult_dose': '5-10 mg once daily.',
+        'child_dose': 'Use only under medical supervision.',
+    },
+    'salbutamol': {
+        'description': 'Bronchodilator inhaler for asthma.',
+        'adult_dose': '100-200 mcg every 4-6 hours as needed.',
+        'child_dose': 'Consult doctor.',
+    },
+    'fluticasone': {
+        'description': 'Inhaled corticosteroid for asthma.',
+        'adult_dose': '100-500 mcg twice daily.',
+        'child_dose': 'Consult doctor.',
+    },
+    'ORS': {
+        'description': 'Oral rehydration salts to prevent dehydration.',
+        'adult_dose': 'As directed on packaging.',
+        'child_dose': 'As directed on packaging.',
+    },
+    'nitrofurantoin': {
+        'description': 'Antibiotic for urinary tract infections.',
+        'adult_dose': '50-100 mg four times daily.',
+        'child_dose': 'Not recommended under 1 month.',
+    },
+    'ferrous sulfate': {
+        'description': 'Iron supplement for anemia.',
+        'adult_dose': '325 mg once to three times daily.',
+        'child_dose': 'Dose varies; consult doctor.',
+    },
+    'acyclovir': {
+        'description': 'Antiviral for cold sores and herpes.',
+        'adult_dose': '200-800 mg 5 times daily.',
+        'child_dose': 'Dose varies; consult doctor.',
+    },
+    'meclizine': {
+        'description': 'Used for motion sickness and vertigo.',
+        'adult_dose': '25-50 mg one hour before travel.',
+        'child_dose': 'Use only under medical supervision.',
+    },
+    'glucose tablets': {
+        'description': 'Fast-acting sugar tablets for low blood sugar.',
+        'adult_dose': '15-20 grams at onset of symptoms.',
+        'child_dose': 'Dose based on age and weight.',
+    },
+    'simethicone': {
+        'description': 'Used to relieve gas and bloating.',
+        'adult_dose': '40-125 mg up to 4 times daily after meals.',
+        'child_dose': '20 mg up to 4 times daily.',
+    },
+    'calamine lotion': {
+        'description': 'Used to soothe itching and rash.',
+        'adult_dose': 'Apply to affected area as needed.',
+        'child_dose': 'Use as directed.',
+    },
+    'dextromethorphan': {
+        'description': 'Cough suppressant.',
+        'adult_dose': '10-20 mg every 4 hours (max 120 mg/day).',
+        'child_dose': '5-10 mg every 4 hours (max 60 mg/day).',
+    },
+    'colchicine': {
+        'description': 'Used for gout flare treatment.',
+        'adult_dose': '1.2 mg initially, then 0.6 mg one hour later.',
+        'child_dose': 'Not recommended for children.',
+    },
+    'methimazole': {
+        'description': 'Used for hyperthyroidism treatment.',
+        'adult_dose': '5-30 mg daily in divided doses.',
+        'child_dose': 'Use under medical supervision.',
+    },
+    'levothyroxine': {
+        'description': 'Thyroid hormone replacement.',
+        'adult_dose': '25-200 mcg daily.',
+        'child_dose': 'Use under medical supervision.',
+    },
+    'sumatriptan': {
+        'description': 'Migraine-specific pain relief.',
+        'adult_dose': '50-100 mg at onset of migraine.',
+        'child_dose': 'Not recommended for children.',
+    },
+    'epinephrine': {
+        'description': 'Emergency treatment for anaphylaxis.',
+        'adult_dose': '0.3-0.5 mg intramuscularly.',
+        'child_dose': '0.01 mg/kg intramuscularly (max 0.3 mg).',
+    },
+    'warfarin': {
+        'description': 'Blood thinner to prevent clots.',
+        'adult_dose': '2-10 mg daily (adjusted by INR).',
+        'child_dose': 'Use under medical supervision.',
+    },
+    'atorvastatin': {
+        'description': 'Lowers cholesterol levels.',
+        'adult_dose': '10-80 mg once daily.',
+        'child_dose': 'Use under medical supervision.',
+    },
+    'calcipotriol': {
+        'description': 'Vitamin D analog for psoriasis treatment.',
+        'adult_dose': 'Apply thin layer twice daily.',
+        'child_dose': 'Use under doctor’s supervision.',
+    },
+    'mupirocin': {
+        'description': 'Topical antibiotic for skin infections.',
+        'adult_dose': 'Apply 2-3 times daily.',
+        'child_dose': 'Use under medical supervision.',
+    },
+    'vitamin d': {
+        'description': 'Vitamin D supplement.',
+        'adult_dose': '600-800 IU daily.',
+        'child_dose': '400-600 IU daily.',
+    },
+    'clotrimazole': {
+        'description': 'Antifungal cream for skin infections.',
+        'adult_dose': 'Apply 2 times daily.',
+        'child_dose': 'Use under doctor’s advice.',
+    },
+    'fluoxetine': {
+        'description': 'Antidepressant (SSRI).',
+        'adult_dose': '20-60 mg daily.',
+        'child_dose': 'Use under medical supervision.',
+    },
+    'alprazolam': {
+        'description': 'Anxiolytic benzodiazepine.',
+        'adult_dose': '0.25-0.5 mg 3 times daily.',
+        'child_dose': 'Not generally recommended for children.',
+    },
+    'alendronate': {
+        'description': 'Bisphosphonate for osteoporosis.',
+        'adult_dose': '70 mg once weekly.',
+        'child_dose': 'Use under medical supervision.',
+    },
+    'chloramphenicol eye drops': {
+        'description': 'Antibiotic eye drops for bacterial conjunctivitis.',
+        'adult_dose': '1-2 drops every 2-4 hours.',
+        'child_dose': 'Use under medical supervision.',
+    },
+
+    'pseudoephedrine': {
+        'description': 'Nasal decongestant.',
+        'adult_dose': '60 mg every 4-6 hours (max 240 mg/day).',
+        'child_dose': 'Use only under medical supervision.',
+    },
+    'zolpidem': {
+        'description': 'Sedative-hypnotic for insomnia.',
+        'adult_dose': '5-10 mg before bedtime.',
+        'child_dose': 'Not recommended for children.',
+    },
+    'ciprofloxacin ear drops': {
+        'description': 'Antibiotic ear drops for otitis externa.',
+        'adult_dose': '3 drops twice daily.',
+        'child_dose': 'Use under medical supervision.',
+    },
+    'permethrin shampoo': {
+        'description': 'Treatment for head lice.',
+        'adult_dose': 'Apply as directed, usually once.',
+        'child_dose': 'Use under medical supervision.',
+    },
+    'potassium chloride': {
+        'description': 'Potassium supplement.',
+        'adult_dose': '20-100 mEq daily in divided doses.',
+        'child_dose': 'Use under medical supervision.',
+    },
+    'tiotropium': {
+        'description': 'Long-acting bronchodilator used for COPD and bronchitis.',
+        'adult_dose': '18 mcg inhaled once daily.',
+        'child_dose': 'Not typically used in children.'
+    },
+    'azithromycin': {
+        'description': 'Macrolide antibiotic used for respiratory and skin infections.',
+        'adult_dose': '500 mg on day 1, then 250 mg daily for 4 days.',
+        'child_dose': '10 mg/kg on day 1, then 5 mg/kg daily for 4 days.'
+    },
+    'dornase alfa': {
+        'description': 'Mucolytic agent used in cystic fibrosis to clear mucus.',
+        'adult_dose': '2.5 mg inhaled once daily.',
+        'child_dose': '2.5 mg inhaled once daily.'
+    },
+    'timolol eye drops': {
+        'description': 'Beta blocker eye drops for glaucoma.',
+        'adult_dose': '1 drop in affected eye(s) twice daily.',
+        'child_dose': 'Use only if prescribed by specialist.'
+    },
+    'oxybutynin': {
+        'description': 'Used for urinary incontinence by relaxing bladder muscles.',
+        'adult_dose': '5 mg 2-3 times daily.',
+        'child_dose': 'Not routinely used in children.'
+    },
+    'topiramate': {
+        'description': 'Used for migraine prevention and epilepsy.',
+        'adult_dose': '25-100 mg twice daily.',
+        'child_dose': '1-3 mg/kg/day in divided doses.'
+    },
+    'methotrexate': {
+        'description': 'Disease-modifying antirheumatic drug.',
+        'adult_dose': '7.5-25 mg once weekly.',
+        'child_dose': '10-15 mg/m² once weekly.'
+    },
+    'prednisolone': {
+        'description': 'Corticosteroid used for inflammation and autoimmune diseases.',
+        'adult_dose': '5-60 mg daily depending on condition.',
+        'child_dose': '0.14-2 mg/kg daily depending on condition.'
+    },
+    'hydroxychloroquine': {
+        'description': 'Used for autoimmune diseases like lupus.',
+        'adult_dose': '200-400 mg daily.',
+        'child_dose': 'Not commonly used in children.'
+    },
+    'enalapril': {
+        'description': 'ACE inhibitor for high blood pressure and kidney protection.',
+        'adult_dose': '5-40 mg daily in 1-2 doses.',
+        'child_dose': '0.08-0.6 mg/kg daily.'
+    },
+    'furosemide': {
+        'description': 'Loop diuretic for fluid retention.',
+        'adult_dose': '20-80 mg daily.',
+        'child_dose': '1-2 mg/kg daily.'
+    },
+    'isoniazid': {
+        'description': 'Antitubercular drug.',
+        'adult_dose': '5 mg/kg daily (max 300 mg).',
+        'child_dose': '10-15 mg/kg daily.'
+    },
+    'rifampicin': {
+        'description': 'Antitubercular drug.',
+        'adult_dose': '10 mg/kg daily (max 600 mg).',
+        'child_dose': '10-20 mg/kg daily.'
+    },
+    'allopurinol': {
+        'description': 'Reduces uric acid production in gout.',
+        'adult_dose': '100-300 mg daily.',
+        'child_dose': 'Not commonly used in children.'
+    },
+    'propranolol': {
+        'description': 'Beta blocker used in hyperthyroidism and hypertension.',
+        'adult_dose': '40-320 mg daily in divided doses.',
+        'child_dose': '0.5-3 mg/kg daily in divided doses.'
+    },
+    'entecavir': {
+        'description': 'Antiviral for hepatitis B infection.',
+        'adult_dose': '0.5 mg once daily.',
+        'child_dose': 'Dose varies; consult doctor.'
+    },
+    'deferoxamine': {
+        'description': 'Iron chelator used in iron overload.',
+        'adult_dose': '20-60 mg/kg/day by infusion.',
+        'child_dose': 'Same as adult; under medical supervision.'
+    },
+    'benzoyl peroxide': {
+        'description': 'Topical treatment for acne.',
+        'adult_dose': 'Apply once or twice daily.',
+        'child_dose': 'Use with caution; consult doctor.'
+    },
+    'clindamycin topical': {
+        'description': 'Topical antibiotic for acne.',
+        'adult_dose': 'Apply twice daily.',
+        'child_dose': 'Consult pediatrician.'
+    }
+}
+
+FIRSTAID_DB = {
+    'cut': 'Clean with water, apply antiseptic, and cover with a bandage.',
+    'burn': 'Cool under running water for 10 mins. Do not use ice.',
+    'nosebleed': 'Sit upright, lean forward, pinch nose for 10 minutes.',
+    'fainting': 'Lay person down, elevate legs, loosen clothing, give fresh air.',
+    'sprain': 'Apply ice, elevate the limb, rest, and compress with bandage.',
+    'high bp': 'Stay calm, sit comfortably. Take medicine if available.',
+    'low sugar': 'Give glucose/sweet drink. Let the person rest and recover.',
+    'choking': 'Give 5 back blows. Perform Heimlich maneuver if needed.',
+    'heat stroke': 'Move to a cool place. Use cool cloths and give water slowly.',
+    'animal bite': 'Clean wound thoroughly with soap and water. Apply antiseptic and cover. Seek medical help for rabies risk.',
+    'poisoning': 'Call poison control immediately. Do not induce vomiting unless instructed. Keep person calm and still.',
+    'hypothermia': 'Move to warm place, remove wet clothes, cover with blankets. Offer warm drinks if conscious.',
+    'shock': 'Lay person down, elevate legs, keep warm, and monitor breathing until help arrives.',
+    'seizure': 'Protect head, clear area of dangerous objects. Do not restrain. Turn person on side after seizure.',
+    'insect sting': 'Remove stinger if present. Apply cold compress. Use antihistamine cream if itching occurs.',
+    'nose fracture': 'Apply cold pack, keep head elevated. Avoid blowing nose. Seek medical care.',
+    'frostbite': 'Move to warm environment. Warm affected area with body heat or warm water (not hot). Avoid rubbing.',
+    'eye injury': 'Do not rub eye. Rinse with clean water or saline. Seek immediate medical attention if severe.',
+    'electrical shock': 'Do not touch person if still in contact with electrical source. Disconnect power, then provide CPR if needed.',
+    'allergic reaction': 'Give antihistamine if available. Call emergency if breathing difficulty occurs.',
+    'asthma attack': 'Help person sit upright, use inhaler if available. Call emergency if no improvement.',
+    'bee sting': 'Remove stinger, apply cold pack, take antihistamine if swelling occurs.',
+    'blisters': 'Keep clean, avoid popping. Cover with sterile dressing.',
+    'broken bone': 'Immobilize limb, avoid moving injured part. Seek medical help.',
+    'croup': 'Sit child upright, keep calm, use humidifier or steam.',
+    'dehydration': 'Give small sips of water or oral rehydration solution.',
+    'diabetic emergency': 'If unconscious, call emergency. If conscious, give sugar or glucose.',
+    'drowning': 'Remove from water, call emergency, start CPR if not breathing.',
+    'earache': 'Apply warm compress outside ear. Avoid inserting objects inside.',
+    'electric shock minor': 'Check for burns, cover with sterile dressing, seek medical advice.',
+    'eye foreign body': 'Do not rub eye, rinse with clean water or saline.',
+    'fever': 'Keep person cool, give fluids, administer paracetamol if needed.',
+    'fingernail injury': 'Clean wound, apply pressure to stop bleeding, cover with bandage.',
+    'food poisoning': 'Give plenty of fluids, rest, seek medical care if severe.',
+    'fracture': 'Immobilize limb, do not try to realign bone, seek immediate medical care.',
+    'head injury': 'Keep person still, monitor consciousness, seek emergency help if confused or vomiting.',
+    'heat exhaustion': 'Move to shade, rest, drink fluids slowly.',
+    'hypoglycemia': 'Give fast-acting sugar like juice or glucose tablets.',
+    'insect bite': 'Clean area, apply cold pack, watch for allergic signs.',
+    'jaw injury': 'Support jaw, avoid movement, seek urgent medical attention.',
+    'nose injury': 'Avoid blowing nose, apply cold compress, seek medical care if bleeding persists.',
+    'poison ivy/oak': 'Wash area, apply anti-itch cream, avoid scratching.',
+    'pulled muscle': 'Rest, ice, compress, elevate.',
+    'rash': 'Keep area clean and dry, avoid irritants, apply soothing lotions.',
+    'respiratory distress': 'Help person sit upright, loosen tight clothing, call emergency.',
+    'scabies': 'Avoid scratching, wash bedding, seek medical treatment.',
+    'shock allergic': 'Call emergency, keep person lying down, elevate legs, monitor breathing.',
+    'snake bite': 'Keep person still, immobilize limb, seek immediate medical help. Do not cut or suck venom.',
+    'sprained ankle': 'Rest, ice, compression, elevation (RICE method).',
+    'stroke': 'Call emergency immediately, keep person comfortable and monitor breathing.',
+    'sunstroke': 'Move to shade, cool person with wet cloths, give fluids slowly.',
+    'swallowed object': 'Do not induce vomiting. Seek medical help immediately.',
+    'throat obstruction': 'Encourage coughing, perform Heimlich maneuver if choking continues.',
+    'toothache': 'Rinse mouth with warm water, use cold compress outside cheek, seek dental care.',
+    'toxic exposure': 'Remove person from source, call poison control, follow instructions.',
+    'tick bite': 'Remove tick with tweezers close to skin, clean area, watch for symptoms.',
+    'tonsillitis': 'Gargle warm salt water, rest, give fluids.',
+    'tooth injury': 'Find tooth fragment, keep moist, seek emergency dental care.',
+    'urinary retention': 'Seek medical help, keep person comfortable.',
+    'vomiting': 'Give small sips of water, keep person resting, seek help if persistent.',
+    'wound infection': 'Clean wound, apply antibiotic ointment, watch for redness and swelling.',
+    'wrist sprain': 'Rest, ice, compression, elevation.',
+    'chest pain': 'Call emergency immediately. Keep person calm and seated.',
+    'dizziness': 'Sit or lie down until feeling better, avoid sudden movements.',
+    'eye irritation': 'Rinse with clean water, avoid rubbing, seek care if pain persists.',
+    'nose bleeding': 'Lean forward, pinch nostrils for 10 minutes, avoid blowing nose.',
+    'burn chemical': 'Flush with large amounts of water, seek emergency help.',
+    'severe bleeding': 'Apply direct pressure, elevate limb, call emergency.',
+    'heat cramps': 'Rest in shade, drink electrolyte fluids, gently stretch affected muscles.',
+    'shock trauma': 'Lay person down, elevate legs, keep warm, monitor breathing.',
+    'appendicitis': 'Seek immediate medical help. Do not eat or drink anything.',
+    'anaphylaxis': 'Call emergency immediately. Use epinephrine auto-injector if available.',
+    'broken tooth': 'Rinse mouth with warm water, apply cold compress, seek dental care.',
+    'carbon monoxide poisoning': 'Move person to fresh air, call emergency, provide CPR if needed.',
+    'concussion': 'Keep person awake and monitored, avoid strenuous activity, seek medical care.',
+    'crushed finger': 'Elevate hand, apply ice, control bleeding with pressure, seek urgent care.',
+    'dental abscess': 'Rinse mouth, avoid hot or cold drinks, seek dental care.',
+    'ear bleeding': 'Apply gentle pressure with clean cloth, avoid inserting objects, seek medical help.',
+    'electrocution': 'Do not touch person if still in contact with source. Call emergency immediately.',
+    'foreign body in ear': 'Do not attempt to remove. Seek medical assistance.',
+    'gunshot wound': 'Call emergency, apply direct pressure to bleeding, keep person calm.',
+    'heat rash': 'Keep skin dry, avoid heavy creams, wear loose clothing.',
+    'hives': 'Take antihistamines, avoid known allergens, seek emergency help if breathing difficulty.',
+    'insect bite severe allergic reaction': 'Use epinephrine if available, call emergency immediately.',
+    'jaw dislocation': 'Do not try to move jaw, support head and neck, seek urgent medical care.',
+    'nosebleed severe': 'Apply firm pressure and ice, keep upright, seek emergency if bleeding lasts over 20 minutes.',
+    'pulmonary embolism': 'Call emergency immediately. Keep person calm and still.',
+    'rashes from heat or allergy': 'Keep skin cool and clean, apply soothing lotions, avoid scratching.',
+    'tendon injury': 'Immobilize area, apply ice, elevate limb, seek medical advice.',
+    'whiplash': 'Support neck, avoid sudden movements, seek medical assessment.'
+}
+
+SYMPTOM_SYNONYMS = {
+    'fever': [
+        'temperature', 'hot body', 'high temperature', 'feeling feverish', 'chills',
+        'sweaty feeling', 'heat sensation', 'fever spike', 'warm skin', 'feeling flushed',
+        'pyrexia', 'febrile', 'hyperthermia', 'elevated core temperature', 'febrile illness',
+        'hyperpyrexia', 'febricity', 'thermoregulatory fever', 'febrile state', 'persistent fever'
+    ],
+    'cold': [
+        'runny nose', 'sneezing', 'blocked nose', 'chills', 'sniffles',
+        'nasal drip', 'stuffy nose', 'congestion', 'watery eyes', 'postnasal drip',
+        'rhinorrhea', 'nasal congestion', 'viral rhinitis', 'upper respiratory infection',
+        'nasopharyngitis', 'coryza', 'allergic rhinitis', 'nasal obstruction', 'sinus congestion', 'nasal inflammation'
+    ],
+    'stomach ache': [
+        'belly pain', 'abdominal pain', 'tummy ache', 'stomach cramp', 'upset stomach',
+        'gut pain', 'bowel ache', 'digestive pain', 'stomach discomfort', 'lower abdominal pain',
+        'abdominal discomfort', 'gastralgia', 'epigastric pain', 'gastrointestinal pain', 'visceral pain',
+        'dyspepsia', 'colic', 'enteralgia', 'gastroenteric pain', 'somatic abdominal pain'
+    ],
+    'headache': [
+        'migraine','headache', 'head pain', 'pounding head', 'splitting headache', 'pressure in head',
+        'throbbing temples', 'tension headache', 'sinus headache', 'temple ache', 'tight head band',
+        'cephalalgia', 'tension-type headache', 'vascular headache', 'neuralgic pain', 'cluster headache',
+        'migraine disorder', 'hemicrania', 'primary headache disorder', 'sinusitis headache', 'neurovascular headache'
+    ],
+    'cough': [
+        'throat irritation', 'dry cough', 'wet cough', 'hacking cough', 'persistent cough',
+        'chesty cough', 'tickly cough', 'reflex cough', 'irritant cough', 'coughing fit',
+        'productive cough', 'non-productive cough', 'paroxysmal cough', 'pertussis-like cough', 'bronchospasm cough',
+        'post-tussive emesis', 'reflux cough', 'laryngeal cough', 'cough reflex', 'subacute cough'
+    ],
+    'vomiting': [
+        'throwing up', 'nausea', 'queasiness', 'retching', 'upset stomach',
+        'sick feeling', 'stomach upset', 'being sick', 'puking', 'heaving',
+        'emesis', 'retching reflex', 'gastrointestinal reflux', 'projectile vomiting', 'nausea gravidarum',
+        'vomitus expulsion', 'cyclic vomiting', 'hyperemesis', 'gastroenteritis symptom', 'bilious vomiting'
+    ],
+    'sore throat': [
+        'throat pain', 'throat discomfort', 'scratchy throat', 'raw throat', 'throat irritation',
+        'difficulty swallowing', 'painful swallowing', 'throat soreness', 'hoarseness', 'dry throat',
+        'pharyngitis', 'laryngitis', 'tonsillitis symptom', 'oropharyngeal pain', 'cervical discomfort',
+        'hypopharyngeal pain', 'viral pharyngitis', 'bacterial pharyngitis', 'throat inflammation', 'acute pharyngitis'
+    ],
+    'diarrhea': [
+        'loose motions', 'frequent stools', 'watery stools', 'runny stools', 'urgent bowel movement',
+        'loose stools', 'liquid stools', 'frequent bowel movement', 'bowel urgency', 'loose feces',
+        'diarrhoea', 'gastroenteritis', 'intestinal hypermotility', 'stool frequency increase', 'enteritis',
+        'osmotic diarrhea', 'secretory diarrhea', 'exudative diarrhea', 'motility diarrhea', 'malabsorption diarrhea'
+    ],
+    'constipation': [
+        'hard stools', 'infrequent stools', 'trouble passing stool', 'difficulty pooping', 'blocked bowel',
+        'straining to pass stool', 'dry stools', 'slow bowel movement', 'bowel sluggishness', 'fecal impaction',
+        'obstipation', 'constipation syndrome', 'colonic inertia', 'intestinal transit delay', 'stool retention',
+        'hypomotility', 'functional constipation', 'chronic constipation', 'pelvic floor dysfunction', 'bowel obstruction'
+    ],
+    'rash': [
+        'allergic reaction', 'sneezing fit', 'itchy eyes', 'runny nose', 'rash',
+        'hives', 'swelling', 'watery eyes', 'nasal congestion', 'skin irritation',
+        'hypersensitivity', 'atopy', 'anaphylaxis', 'allergic rhinitis', 'urticaria',
+        'angioedema', 'allergic conjunctivitis', 'allergic dermatitis', 'immunologic reaction', 'type I hypersensitivity'
+    ],
+    'muscle pain': [
+        'muscle ache', 'body ache', 'muscle soreness', 'muscle stiffness', 'muscle cramp',
+        'muscle tenderness', 'aching muscles', 'muscle fatigue', 'muscle tightness', 'muscle discomfort',
+        'myalgia', 'musculoskeletal pain', 'muscle strain', 'muscle spasm', 'fibromyalgia',
+        'myositis', 'muscle injury', 'muscle inflammation', 'soft tissue pain', 'muscle trauma'
+    ],
+    'back pain': [
+        'lower back pain', 'spinal pain', 'backache', 'lumbar pain', 'back stiffness',
+        'aching back', 'upper back pain', 'mid-back pain', 'back muscle pain', 'back discomfort',
+        'lumbago', 'dorsalgia', 'spinal strain', 'discogenic pain', 'facet joint pain',
+        'radicular pain', 'vertebral pain', 'muscle spasm back', 'chronic back pain', 'sciatica'
+    ],
+    'acidity': [
+        'heartburn', 'acid reflux', 'indigestion', 'burning sensation', 'upset stomach',
+        'sour stomach', 'acid regurgitation', 'chest burning', 'bloating', 'belching',
+        'gastroesophageal reflux', 'GERD', 'pyrosis', 'acid dyspepsia', 'esophageal irritation',
+        'gastric reflux', 'reflux esophagitis', 'esophageal burning', 'non-cardiac chest pain', 'gastric acidity'
+    ],
+    'insomnia': [
+        'difficulty sleeping', 'can’t sleep', 'restless sleep', 'poor sleep', 'trouble falling asleep',
+        'nighttime wakefulness', 'sleeplessness', 'early waking', 'light sleep', 'interrupted sleep',
+        'primary insomnia', 'chronic insomnia', 'sleep initiation disorder', 'sleep maintenance disorder', 'psychophysiologic insomnia',
+        'sleep disorder', 'circadian rhythm disruption', 'non-restorative sleep', 'paradoxical insomnia', 'idiopathic insomnia'
+    ],
+    'anxiety': [
+        'nervousness', 'panic', 'restlessness', 'worry', 'fear',
+        'uneasiness', 'apprehension', 'jitters', 'tense feeling', 'nervous tension',
+        'generalized anxiety disorder', 'panic disorder', 'social anxiety', 'agoraphobia', 'phobia',
+        'anxiousness', 'psychological distress', 'hypervigilance', 'autonomic arousal', 'anxiety syndrome'
+    ],
+    'depression': [
+        'low mood', 'feeling down', 'sadness', 'hopelessness', 'loss of interest',
+        'apathy', 'tearfulness', 'gloominess', 'despair', 'lack of motivation',
+        'major depressive disorder', 'clinical depression', 'persistent depressive disorder', 'dysthymia', 'melancholia',
+        'affective disorder', 'mood disorder', 'depressive episode', 'psychomotor retardation', 'anhedonia'
+    ],
+    'rash': [
+        'skin irritation', 'red patches', 'itchy skin', 'skin bumps', 'rash spots',
+        'skin redness', 'rash outbreak', 'blotchy skin', 'skin inflammation', 'skin eruption',
+        'dermatitis', 'eczema', 'urticaria', 'exanthema', 'erythema',
+        'cutaneous eruption', 'skin lesion', 'maculopapular rash', 'papular rash', 'vesicular rash'
+    ],
+    'joint pain': [
+        'aching joints', 'joint stiffness', 'joint soreness', 'joint discomfort', 'joint swelling',
+        'joint ache', 'joint tenderness', 'joint inflammation', 'joint tightness', 'joint mobility issues',
+        'arthralgia', 'arthritis pain', 'synovitis', 'degenerative joint disease', 'rheumatoid arthritis',
+        'osteoarthritis', 'inflammatory arthritis', 'joint effusion', 'joint edema', 'periarticular pain'
+    ],
+    'ear pain': [
+        'earache', 'pain in ear', 'ear discomfort', 'ear pressure', 'ear fullness',
+        'ear soreness', 'ear infection pain', 'ear canal pain', 'ear drum pain', 'ear inflammation',
+        'otalgia', 'acute otitis media', 'external otitis', 'middle ear infection', 'ear barotrauma',
+        'ear canal inflammation', 'mastoiditis', 'ear neuropathy', 'ear pain syndrome', 'ear trauma'
+    ],
+    'eye irritation': [
+        'itchy eyes', 'burning eyes', 'red eyes', 'watery eyes', 'eye discomfort',
+        'eye redness', 'eye soreness', 'foreign body sensation', 'eye dryness', 'eye inflammation',
+        'conjunctivitis', 'keratitis', 'blepharitis', 'ocular pruritus', 'ocular irritation',
+        'episcleritis', 'uveitis', 'dry eye syndrome', 'ocular surface inflammation', 'allergic conjunctivitis'
+    ],
+    'burns': [
+        'skin burn', 'scald', 'burn injury', 'burn wound', 'heat injury',
+        'thermal injury', 'skin blistering', 'burn mark', 'burn pain', 'burn inflammation',
+        'thermal burn', 'first degree burn', 'second degree burn', 'third degree burn', 'chemical burn',
+        'electrical burn', 'radiation burn', 'cutaneous burn', 'burn necrosis', 'burn trauma'
+    ],
+    'sprain': [
+        'twisted ankle', 'ligament injury', 'joint sprain', 'soft tissue injury', 'overstretching',
+        'ligament tear', 'joint strain', 'muscle sprain', 'sprained ligament', 'ligamentous injury',
+        'ankle sprain', 'wrist sprain', 'knee sprain', 'grade 1 sprain', 'grade 2 sprain',
+        'grade 3 sprain', 'ligament rupture', 'joint instability', 'acute sprain', 'chronic sprain'
+    ],
+    'nasal congestion': [
+        'blocked nose', 'stuffy nose', 'nasal blockage', 'clogged nose', 'congested nostrils',
+        'difficulty breathing through nose', 'nasal stuffiness', 'nasal obstruction', 'sinus congestion', 'nasal swelling',
+        'rhinitis', 'nasal mucosal edema', 'nasal obstruction', 'chronic rhinosinusitis', 'allergic rhinitis',
+        'nasal polyposis', 'nasal valve collapse', 'vasomotor rhinitis', 'nasal turbinate hypertrophy', 'nasal passage inflammation'
+    ],
+    'toothache': [
+        'dental pain', 'pain in tooth', 'tooth pain', 'tooth sensitivity', 'aching tooth',
+        'tooth discomfort', 'tooth nerve pain', 'tooth cavity pain', 'gum pain', 'oral pain',
+        'dental neuralgia', 'pulpitis', 'odontalgia', 'periapical abscess', 'dental caries pain',
+        'periodontal pain', 'alveolar pain', 'tooth root pain', 'dental pulp inflammation', 'pericoronitis'
+    ],
+    'acid reflux': [
+        'heartburn', 'sour burps', 'regurgitation', 'acid regurgitation', 'burning chest',
+        'acid taste', 'upset stomach', 'indigestion', 'bitter taste', 'acid backflow',
+        'gastroesophageal reflux disease', 'GERD', 'esophageal reflux', 'reflux esophagitis', 'pyrosis',
+        'gastric reflux', 'esophageal irritation', 'acid dyspepsia', 'non-cardiac chest pain', 'reflux symptom'
+    ],
+    'dizziness': [
+        'lightheadedness', 'faint feeling', 'wooziness', 'unsteadiness', 'vertigo',
+        'giddiness', 'dazed feeling', 'loss of balance', 'spinning sensation', 'head spinning',
+        'presyncope', 'vertiginous sensation', 'vestibular dysfunction', 'postural hypotension', 'orthostatic hypotension',
+        'labyrinthitis', 'benign positional vertigo', 'cerebellar dysfunction', 'equilibrium disorder', 'ataxia'
+    ],
+    'fatigue': [
+        'tiredness', 'low energy', 'exhaustion', 'sleepiness', 'weariness',
+        'lethargy', 'lack of energy', 'weakness', 'lack of motivation', 'sluggishness',
+        'chronic fatigue', 'asthenia', 'malaise', 'post-exertional malaise', 'fatigue syndrome',
+        'myasthenia', 'adynamia', 'debilitation', 'somnolence', 'burnout'
+    ],
+    'dry mouth': [
+        'mouth dryness', 'thirsty all the time', 'cotton mouth', 'sticky mouth', 'parched mouth',
+        'xerostomia sensation', 'oral dryness', 'lack of saliva', 'dry lips', 'dry throat',
+        'xerostomia', 'salivary gland hypofunction', 'oral mucosa dryness', 'saliva deficiency', 'hyposalivation',
+        'dehydrated oral mucosa', 'oral mucosal dryness', 'saliva reduction', 'dry oral cavity', 'dry mouth syndrome'
+    ],
+    'hiccups': [
+        'hiccoughs', 'involuntary hiccuping', 'singultus', 'belly spasms', 'stomach spasms',
+        'diaphragm spasms', 'spasmodic hiccups', 'persistent hiccups', 'repetitive hiccups', 'uncontrollable hiccups',
+        'singultus', 'phrenic nerve irritation', 'diaphragmatic spasm', 'reflex hiccups', 'chronic hiccups',
+        'persistent singultus', 'intractable hiccups', 'idiopathic hiccups', 'psychogenic hiccups', 'neurological hiccups'
+    ],
+    'swelling': [
+        'bump', 'inflamed area', 'puffiness', 'lump', 'edema',
+        'enlargement', 'swollen area', 'thickening', 'protuberance', 'raised area',
+        'edema', 'inflammation', 'tissue swelling', 'localized edema', 'angioedema',
+        'lymphedema', 'cellulitis swelling', 'soft tissue edema', 'post-traumatic swelling', 'peripheral edema'
+    ],
+    'difficulty breathing': [
+        'shortness of breath', 'breathlessness', 'trouble breathing', 'labored breathing', 'difficulty inhaling',
+        'difficulty exhaling', 'gasping', 'wheezing', 'chest tightness', 'air hunger',
+        'dyspnea', 'respiratory distress', 'tachypnea', 'hypoxia', 'bronchospasm',
+        'pulmonary edema', 'asthmatic attack', 'chronic obstructive pulmonary disease exacerbation', 'respiratory insufficiency', 'alveolar hypoventilation'
+    ],
+    'palpitations': [
+        'fast heartbeat', 'irregular heartbeat', 'heart racing', 'fluttering chest', 'skipped beats',
+        'pounding heart', 'chest pounding', 'irregular pulse', 'awareness of heartbeat', 'heart thumping',
+        'arrhythmia', 'tachycardia', 'ectopic beats', 'atrial fibrillation', 'ventricular tachycardia',
+        'supraventricular tachycardia', 'palpitations syndrome', 'heart rhythm disorder', 'cardiac dysrhythmia', 'extrasystole'
+    ],
+    'blurred vision': [
+        'fuzzy vision', 'unclear sight', 'cloudy vision', 'dim vision', 'hazy vision',
+        'vision loss', 'double vision', 'seeing spots', 'vision distortion', 'poor eyesight',
+        'visual impairment', 'amblyopia', 'diplopia', 'ocular blur', 'visual disturbance',
+        'retinopathy', 'optic neuritis', 'cataract', 'macular degeneration', 'glaucoma'
+    ],
+    'frequent urination': [
+        'urinating often', 'peeing a lot', 'frequent bathroom trips', 'increased urination', 'urgent urination',
+        'nocturia', 'polyuria', 'urinary frequency', 'frequent voiding', 'excessive urination',
+        'pollakiuria', 'diabetes mellitus symptom', 'overactive bladder', 'cystitis symptom', 'urinary tract infection symptom',
+        'bladder irritation', 'urinary urgency', 'urethral syndrome', 'diuretic effect', 'voiding dysfunction'
+    ],
+    'urine burning': [
+        'burning during urination', 'painful urination', 'stinging pee', 'burning sensation when peeing', 'urethral burning',
+        'pain in urinary tract', 'urinary discomfort', 'painful micturition', 'stinging urination', 'urine sting',
+        'dysuria', 'urethritis', 'cystitis symptom', 'urinary tract infection', 'prostatitis symptom',
+        'urethral irritation', 'urinary tract inflammation', 'urethral pain syndrome', 'urethral syndrome', 'inflammatory urinary symptoms'
+    ],
+    'skin dryness': [
+        'dry skin', 'flaky skin', 'rough skin', 'chapped skin', 'scaly skin',
+        'itchy dry skin', 'skin tightness', 'cracked skin', 'dull skin', 'skin peeling',
+        'xerosis', 'ichthyosis', 'cutaneous xerosis', 'atopic dermatitis symptom', 'keratosis',
+        'dry epidermis', 'dermatitis sicca', 'skin barrier dysfunction', 'hypohydrosis', 'pruritus due to dryness'
+    ],
+    'cracked lips': [
+        'dry lips', 'chapped lips', 'split lips', 'flaky lips', 'painful lips',
+        'lip soreness', 'lip fissures', 'lip dryness', 'inflamed lips', 'peeling lips',
+        'cheilitis', 'angular stomatitis', 'lip dermatitis', 'lip xerosis', 'herpes labialis',
+        'lip inflammation', 'lip cracking', 'lip ulceration', 'perleche', 'lip mucosa dryness'
+    ],
+    'loss of appetite': [
+        'not hungry', 'reduced appetite', 'poor appetite', 'lack of hunger', 'no desire to eat',
+        'decreased hunger', 'anorexia', 'appetite loss', 'food aversion', 'reduced food intake',
+        'anorexia nervosa', 'cachexia', 'hyporexia', 'appetite suppression', 'malnutrition symptom',
+        'dysorexia', 'appetite disturbance', 'psychogenic anorexia', 'disease-associated anorexia', 'appetite disorder'
+    ],
+    'leg pain': [
+        'lower limb pain', 'leg ache', 'leg discomfort',
+        'leg cramp', 'leg soreness', 'leg stiffness', 'leg muscle pain', 'limb pain',
+        'myalgia leg', 'leg strain', 'leg injury', 'leg tenderness', 'leg trauma'
+    ],
+    'hand pain': [
+        'finger pain', 'wrist pain', 'hand ache', 'hand discomfort', 'hand cramp',
+        'hand soreness', 'hand stiffness', 'manual pain', 'hand muscle pain', 'hand injury',
+        'hand strain', 'hand tenderness', 'hand trauma', 'manual ache', 'manual discomfort'
+    ],
+    'knee pain': [
+        'knee ache', 'knee discomfort', 'patella pain', 'knee joint pain', 'knee soreness',
+        'knee stiffness', 'knee injury', 'knee strain', 'knee trauma', 'patellofemoral pain',
+        'gonalgia', 'knee swelling', 'knee tenderness', 'knee inflammation', 'knee bursitis'
+    ],
+    'neck pain': [
+        'cervical pain', 'neck ache', 'neck discomfort', 'neck stiffness', 'neck muscle pain',
+        'neck cramp', 'cervicalgia', 'neck strain', 'neck injury', 'neck trauma',
+        'neck tenderness', 'neck soreness', 'neck tightness', 'neck spasms', 'neck ache'
+    ],
+    'shoulder pain': [
+        'shoulder ache', 'shoulder discomfort', 'shoulder joint pain', 'shoulder soreness',
+        'shoulder stiffness', 'shoulder strain', 'shoulder injury', 'shoulder trauma',
+        'rotator cuff pain', 'shoulder bursitis', 'shoulder tenderness', 'shoulder tightness',
+        'shoulder muscle pain', 'deltoid pain', 'shoulder sprain'
+    ],
+    'hip pain': [
+        'hip ache', 'hip discomfort', 'hip joint pain', 'hip soreness', 'hip stiffness',
+        'hip strain', 'hip injury', 'hip trauma', 'coxalgia', 'hip bursitis',
+        'hip tenderness', 'hip muscle pain', 'hip sprain', 'hip tightness', 'hip socket pain'
+    ],
+    'elbow pain': [
+        'elbow ache', 'elbow discomfort', 'elbow joint pain', 'elbow soreness',
+        'elbow stiffness', 'elbow strain', 'elbow injury', 'elbow trauma',
+        'tennis elbow', 'golfer’s elbow', 'elbow bursitis', 'elbow tenderness',
+        'elbow sprain', 'cubital pain', 'elbow muscle pain'
+    ],
+    'wrist pain': [
+        'wrist ache', 'wrist discomfort', 'wrist joint pain', 'wrist soreness',
+        'wrist stiffness', 'wrist strain', 'wrist injury', 'wrist trauma',
+        'carpal pain', 'carpal tunnel pain', 'wrist tendonitis', 'wrist bursitis',
+        'wrist tenderness', 'wrist sprain', 'wrist muscle pain'
+    ],
+    'ankle pain': [
+        'ankle ache', 'ankle discomfort', 'ankle joint pain', 'ankle soreness',
+        'ankle stiffness', 'ankle strain', 'ankle injury', 'ankle trauma',
+        'ankle sprain', 'ankle tendonitis', 'ankle bursitis', 'ankle swelling',
+        'ankle tenderness', 'ankle muscle pain', 'ankle ligament pain'
+    ],
+    'heel pain': [
+        'heel ache', 'heel discomfort', 'heel soreness', 'heel spurs', 'plantar fasciitis',
+        'calcaneal pain', 'heel inflammation', 'heel tenderness', 'heel injury',
+        'heel strain', 'heel trauma', 'heel muscle pain', 'heel burning', 'heel swelling'
+    ],
+    'foot pain': [
+        'foot ache', 'foot discomfort', 'foot soreness', 'foot cramp', 'foot muscle pain',
+        'foot injury', 'foot strain', 'foot trauma', 'foot tenderness', 'foot numbness',
+        'foot burning', 'foot joint pain', 'foot swelling', 'foot inflammation', 'foot sprain'
+    ],
+    'jaw pain': [
+        'jaw ache', 'jaw discomfort', 'jaw soreness', 'jaw stiffness', 'temporomandibular',
+        'TMJ pain', 'jaw muscle pain', 'jaw inflammation', 'jaw tenderness', 'jaw trauma',
+        'jaw strain', 'jaw spasm', 'mandibular pain', 'jaw clicking', 'jaw locking'
+    ],
+    'thigh pain': [
+        'thigh ache', 'thigh discomfort', 'thigh soreness', 'thigh cramp', 'thigh muscle pain',
+        'thigh strain', 'thigh injury', 'thigh trauma', 'quadriceps pain', 'hamstring pain',
+        'thigh tenderness', 'thigh stiffness', 'thigh tightness', 'thigh swelling'
+    ],
+    'calf pain': [
+        'calf ache', 'calf discomfort', 'calf soreness', 'calf cramp', 'calf muscle pain',
+        'calf strain', 'calf injury', 'calf trauma', 'calf tenderness', 'calf tightness',
+        'calf swelling', 'gastrocnemius pain', 'calf stiffness', 'calf spasms'
+    ],
+    'groin pain': [
+        'groin ache', 'groin discomfort', 'groin soreness', 'inguinal pain', 'groin strain',
+        'groin injury', 'groin trauma', 'groin tenderness', 'groin tightness','groin pull',
+        'groin sprain', 'pelvic pain','adductor pain', 'inner thigh pain'
+    ],
+    'tailbone pain': [
+        'coccyx pain', 'tailbone ache', 'tailbone discomfort', 'tailbone soreness',
+        'coccydynia', 'tailbone injury', 'tailbone trauma', 'tailbone tenderness',
+        'lower back pain', 'sitting pain', 'coccygeal pain', 'tailbone inflammation',
+        'pelvic pain', 'tailbone bruising', 'tailbone spasm'
+    ],
+    'rib pain': [
+        'rib ache', 'rib discomfort', 'rib soreness', 'rib injury', 'rib trauma',
+        'rib fracture pain', 'costal pain', 'chest wall pain', 'rib tenderness',
+        'rib inflammation', 'intercostal pain', 'rib bruising', 'rib strain', 'thoracic pain', 'rib cage pain'
+    ],
+    'abdominal pain': [
+        'belly pain', 'tummy ache', 'abdominal ache', 'abdominal discomfort',
+        'gut pain', 'abdomen ache', 'abdominal cramps', 'abdominal tenderness',
+        'visceral pain', 'abdominal soreness', 'epigastric pain', 'lower abdominal pain',
+        'abdominal spasm', 'intestinal pain', 'gastrointestinal pain', 'abdomen tenderness'
+    ],
+    'pelvic pain': [
+        'pelvis pain', 'pelvic ache', 'pelvic discomfort', 'pelvic soreness', 'pelvic cramps',
+        'pelvic strain', 'pelvic injury', 'pelvic trauma', 'lower abdominal pain', 'pelvic tenderness',
+        'pelvic inflammation', 'pelvic muscle pain', 'pelvic pressure', 'pelvic girdle pain', 'pelvic tightness'
+    ],
+    'chest pain mild': [
+        'chest discomfort', 'mild chest pain', 'chest ache', 'chest tightness', 'chest pressure',
+        'chest heaviness', 'thoracic pain', 'cardiac discomfort', 'chest soreness', 'chest distress',
+        'chest burning', 'chest pain minor', 'non-severe chest pain', 'chest pain light', 'chest pain mild'
+    ],
+    'eye pain': [
+        'ocular pain', 'eye ache', 'eye discomfort', 'eye soreness', 'eye irritation',
+        'eye burning', 'eye redness', 'eye inflammation', 'eye tenderness', 'ocular discomfort',
+        'ocular soreness', 'ocular irritation', 'eye ache', 'eye spasm', 'eye strain'
+    ],
+    'temple pain': [
+        'temporal pain', 'temple ache', 'headache', 'temple discomfort', 'temporal headache',
+        'head pain', 'side head pain', 'head ache', 'temple soreness', 'temporal ache',
+        'temporal tenderness', 'temple tightness', 'temporal spasm', 'head pain side', 'temple pressure'
+    ],
+    'pain during urination': [
+        'dysuria', 'burning urination', 'painful urination', 'painful peeing', 'pain urinating',
+        'urinary pain', 'painful micturition', 'painful passing urine', 'urethral pain', 'urinary discomfort',
+        'pain while urinating', 'pain urination', 'painful urination sensation', 'urination discomfort', 'painful urination feeling'
+    ],
+    'painful periods': [
+        'dysmenorrhea', 'menstrual cramps', 'period pain', 'menstrual pain', 'menstrual discomfort',
+        'menstrual cramps pain', 'menstrual ache', 'painful menstruation', 'period cramps', 'menstrual soreness',
+        'period discomfort', 'pain during periods', 'menstrual spasms', 'menstrual cramps ache', 'painful menstrual cycles'
+    ],
+    'painful swallowing': [
+        'odynophagia', 'pain swallowing', 'pain on swallowing', 'swallowing pain', 'difficulty swallowing',
+        'painful deglutition', 'throat pain', 'painful throat', 'painful gulping', 'discomfort swallowing',
+        'pain with swallowing', 'painful gulp', 'painful ingestion', 'throat discomfort', 'painful swallow'
+    ],
+    'testicular pain': [
+        'scrotal pain', 'testis pain', 'testicle ache', 'testis ache', 'scrotum pain',
+        'testicular discomfort', 'testicular soreness', 'testicular tenderness', 'testis tenderness',
+        'scrotal discomfort', 'orchialgia', 'testicular strain', 'testicular trauma', 'testicular inflammation', 'testis discomfort'
+    ],
+    'scalp pain': [
+        'scalp ache', 'scalp discomfort', 'scalp soreness', 'head scalp pain', 'scalp tenderness',
+        'scalp irritation', 'scalp inflammation', 'scalp tightness', 'scalp muscle pain', 'scalp spasm',
+        'scalp burning', 'scalp itchiness', 'scalp tenderness', 'scalp trauma', 'scalp sensitivity'
+    ],
+    'breast pain': [
+        'mastalgia', 'breast ache', 'breast discomfort', 'breast soreness', 'breast tenderness',
+        'breast inflammation', 'breast cramps', 'breast swelling', 'breast tightness', 'breast strain',
+        'breast injury', 'breast trauma', 'breast pain sensation', 'breast heaviness', 'breast muscle pain'
+    ],
+    'finger pain': [
+        'finger ache', 'finger discomfort', 'finger soreness', 'finger cramp', 'finger muscle pain',
+        'finger strain', 'finger injury', 'finger trauma', 'finger tenderness', 'finger stiffness',
+        'finger joint pain', 'finger swelling', 'finger numbness', 'finger burning', 'finger inflammation'
+    ],
+    'toe pain': [
+        'toe ache', 'toe discomfort', 'toe soreness', 'toe cramp', 'toe muscle pain',
+        'toe strain', 'toe injury', 'toe trauma', 'toe tenderness', 'toe swelling',
+        'toe numbness', 'toe burning', 'toe joint pain', 'toe inflammation', 'toe stiffness'
+    ],
+    'low bp': ['hypotension', 'low blood pressure', 'decreased blood pressure', 'low arterial pressure'],
+    'high bp': ['hypertension', 'high blood pressure', 'elevated blood pressure', 'raised blood pressure'],
+    'low sugar': ['hypoglycemia', 'low blood glucose', 'low blood sugar', 'low glucose level'],
+    'high sugar': ['hyperglycemia', 'high blood glucose', 'high blood sugar', 'elevated glucose level']
+}
+
+HEALTH_TIPS = [
+    "Eat a balanced diet rich in fruits and vegetables.",
+    "Exercise regularly for at least 30 minutes a day.",
+    "Stay hydrated by drinking plenty of water.",
+    "Get 7-8 hours of quality sleep every night.",
+    "Avoid smoking and limit alcohol consumption.",
+    "Manage stress through meditation or hobbies.",
+    "Wash hands frequently to prevent infections.",
+    "Maintain a healthy weight through diet and exercise.",
+    "Limit intake of processed and sugary foods.",
+    "Include whole grains in your meals.",
+    "Practice good posture to avoid back and neck pain.",
+    "Schedule regular health check-ups.",
+    "Avoid excessive salt intake to control blood pressure.",
+    "Incorporate strength training exercises weekly.",
+    "Avoid excessive screen time and take breaks.",
+    "Use sunscreen to protect skin from UV rays.",
+    "Eat foods rich in omega-3 fatty acids like fish.",
+    "Limit caffeine intake especially in the afternoon and evening.",
+    "Stay socially connected to improve mental health.",
+    "Avoid excessive consumption of red and processed meats.",
+    "Practice mindful eating to avoid overeating.",
+    "Keep your living and work environment clean.",
+    "Avoid sharing personal items to reduce infection risk.",
+    "Keep your vaccinations up to date.",
+    "Limit exposure to air pollution when possible.",
+    "Include probiotics in your diet for gut health.",
+    "Take regular breaks when sitting for long periods.",
+    "Avoid excessive noise exposure to protect hearing.",
+    "Use ergonomic furniture to reduce strain.",
+    "Practice deep breathing exercises for relaxation.",
+    "Avoid eating late at night to improve digestion.",
+    "Drink herbal teas to soothe digestion and relax.",
+    "Avoid crash dieting and aim for sustainable eating habits.",
+    "Include plenty of fiber in your diet for digestion.",
+    "Avoid excessive alcohol consumption.",
+    "Keep emergency contacts handy and know basic first aid.",
+    "Limit added sugars in beverages and snacks.",
+    "Practice safe sex to avoid sexually transmitted infections.",
+    "Include antioxidants in your diet to combat free radicals.",
+    "Avoid prolonged exposure to extreme temperatures.",
+    "Engage in hobbies and activities that bring joy.",
+    "Wear appropriate protective gear during physical activities.",
+    "Keep your mental health a priority.",
+    "Avoid excessive use of antibiotics to prevent resistance.",
+    "Practice gratitude and positive thinking daily.",
+    "Maintain oral hygiene by brushing and flossing regularly.",
+    "Limit intake of fried and fast foods.",
+    "Monitor your blood pressure regularly.",
+    "Stay informed about health news from reliable sources.",
+    "Avoid self-medicating without professional advice.",
+    "Learn and practice CPR and basic life support skills."
+    "Start your day with a glass of warm water and lemon.",
+    "Eat smaller, frequent meals to maintain energy levels.",
+    "Avoid trans fats found in some processed foods.",
+    "Get regular eye check-ups to maintain good vision.",
+    "Limit sugary drinks like soda and energy drinks.",
+    "Include nuts and seeds for healthy fats and proteins.",
+    "Avoid excessive use of mobile devices before bedtime.",
+    "Practice yoga or stretching to improve flexibility.",
+    "Keep a food diary to track your eating habits.",
+    "Ensure your home has proper ventilation.",
+    "Avoid excessive salt to reduce risk of kidney problems.",
+    "Use natural sweeteners like honey or maple syrup in moderation.",
+    "Consume adequate calcium for bone health.",
+    "Avoid excessive consumption of artificial additives and preservatives.",
+    "Stay active by taking stairs instead of elevators.",
+    "Limit intake of canned and processed meats.",
+    "Maintain a positive social circle.",
+    "Avoid eating while distracted, like watching TV or using phones.",
+    "Incorporate seasonal fruits and vegetables in your diet.",
+    "Try to reduce intake of refined flour products.",
+    "Practice safe lifting techniques to prevent injury.",
+    "Use floss or interdental brushes daily.",
+    "Keep feet clean and dry to prevent infections.",
+    "Avoid excessive sitting; stand up every hour if possible.",
+    "Avoid sharing needles or other personal hygiene items.",
+    "Choose healthy cooking methods like grilling or steaming.",
+    "Limit intake of caffeine during pregnancy.",
+    "Ensure your workspace is well-lit to reduce eye strain.",
+    "Drink green tea for antioxidants and metabolism boost.",
+    "Avoid skipping breakfast to maintain metabolism.",
+    "Check your vitamin D levels and supplement if needed.",
+    "Manage allergies by avoiding triggers.",
+    "Be mindful of your salt and sugar intake when eating out.",
+    "Practice safe handling and storage of food to avoid contamination.",
+    "Maintain hydration during exercise to prevent cramps.",
+    "Limit use of plastic containers for food to avoid chemicals.",
+    "Practice regular dental visits for early problem detection.",
+    "Avoid binge eating and maintain balanced portions.",
+    "Stay curious and keep learning to stimulate your brain.",
+    "Wear comfortable shoes that support your feet properly.",
+    "Avoid excessive exposure to screens to prevent headaches.",
+    "Try mindfulness meditation to enhance mental clarity.",
+    "Monitor your cholesterol levels regularly.",
+    "Keep a consistent sleep schedule, even on weekends.",
+    "Avoid excessive consumption of energy drinks.",
+    "Practice hand hygiene especially before meals and after restroom use.",
+    "Incorporate breathing exercises into your daily routine.",
+    "Avoid heavy meals before physical activity.",
+    "Keep your vaccinations current, including flu shots.",
+    "Support mental health by talking openly about feelings.",
+    "Limit added sugars in desserts and snacks."
+]
+
+def get_closest_match(user_input, database):
+    user_input = user_input.strip().lower()
+    for key, synonyms in SYMPTOM_SYNONYMS.items():
+        if user_input in synonyms:
+            return key
+    matches = difflib.get_close_matches(user_input, list(database.keys()), n=1, cutoff=0.6)
+    return matches[0] if matches else None
+
+class AgeVerificationScreen(Screen):
+    def verify_age(self):
+        age_text = self.ids.age_input.text.strip()
+        try:
+            age = int(age_text)
+            if age >= 16:
+                self.ids.age_warning.text = ""
+                App.get_running_app().user_age = age
+                speak("Access granted. Welcome.")
+                self.manager.current = "menu"
+            else:
+                self.ids.age_warning.text = "Access denied. Must be 16+."
+                speak("Access denied. You must be sixteen years or older.")
+        except ValueError:
+            self.ids.age_warning.text = "Please enter a valid age."
+            speak("Please enter a valid age.")
+
+class MenuScreen(Screen):
+    pass
+
+class SymptomScreen(Screen):
+    def on_pre_enter(self):
+        self.ids.symptom_input.text = ""
+        self.ids.age_input.text = ""
+        self.ids.symptom_result.text = ""
+
+    def check_symptom(self):
+        symptom = self.ids.symptom_input.text.strip().lower()
+        age_text = self.ids.age_input.text.strip()
+
+        if not symptom:
+            msg = "Please enter a symptom."
+            self.ids.symptom_result.text = msg
+            speak(msg)
+            return
+
+        try:
+            age = int(age_text)
+        except ValueError:
+            msg = "Please enter a valid age."
+            self.ids.symptom_result.text = msg
+            speak(msg)
+            return
+
+        match = get_closest_match(symptom, SYMPTOM_DB)
+        if match:
+            data = SYMPTOM_DB[match]
+            result = f"[b]Symptom:[/b] {match.capitalize()}\n\n[b]Advice:[/b] {data['advice']}"
+            if data['medicines']:
+                result += "\n\n[b]Recommended Medicines and Dosages:[/b]"
+                for med in data['medicines']:
+                    med_info = MEDICINE_DB.get(med)
+                    if med_info:
+                        dose = med_info['child_dose'] if age <= 12 else med_info['adult_dose']
+                        result += f"\n- [b]{med.capitalize()}[/b]: {dose}"
+        else:
+            result = "Symptom not found. Please consult a healthcare professional."
+
+        self.ids.symptom_result.text = result
+        speak(result)
+
+    def voice_input(self):
+        self.ids.symptom_result.text = "Listening..."
+        def run_listen():
+            text = listen()
+            def update_ui(dt):
+                if text:
+                    self.ids.symptom_input.text = text
+                    self.check_symptom()
+                else:
+                    msg = "Could not understand voice input. Please try again."
+                    self.ids.symptom_result.text = msg
+                    speak(msg)
+            Clock.schedule_once(update_ui)
+        threading.Thread(target=run_listen, daemon=True).start()
+
+    def back_to_menu(self):
+        self.manager.current = 'menu'
+
+class MedicineScreen(Screen):
+    def on_pre_enter(self):
+        self.ids.medicine_input.text = ""
+        self.ids.age_input.text = ""
+        self.ids.medicine_result.text = ""
+
+    def check_medicine(self):
+        med_input = self.ids.medicine_input.text.strip().lower()
+        age_text = self.ids.age_input.text.strip()
+
+        if not med_input:
+            msg = "Please enter a medicine name."
+            self.ids.medicine_result.text = msg
+            speak(msg)
+            return
+
+        try:
+            age = int(age_text)
+        except ValueError:
+            msg = "Please enter a valid age."
+            self.ids.medicine_result.text = msg
+            speak(msg)
+            return
+
+        match = get_closest_match(med_input, MEDICINE_DB)
+        if match:
+            med_info = MEDICINE_DB[match]
+            description = med_info['description']
+            dose = med_info['child_dose'] if age <= 12 else med_info['adult_dose']
+            result = f"[b]Medicine:[/b] {match.capitalize()}\n\n[b]Description:[/b] {description}\n\n[b]Dosage:[/b]\n{dose}"
+        else:
+            result = "Medicine information not found. Please consult a pharmacist."
+        self.ids.medicine_result.text = result
+        speak(result)
+
+    def voice_input(self):
+        self.ids.medicine_result.text = "Listening..."
+        def run_listen():
+            text = listen()
+            def update_ui(dt):
+                if text:
+                    self.ids.medicine_input.text = text
+                    self.check_medicine()
+                else:
+                    msg = "Could not understand voice input. Please try again."
+                    self.ids.medicine_result.text = msg
+                    speak(msg)
+            Clock.schedule_once(update_ui)
+        threading.Thread(target=run_listen, daemon=True).start()
+
+    def back_to_menu(self):
+        self.manager.current = 'menu'
+
+class FirstAidScreen(Screen):
+    def on_pre_enter(self):
+        self.ids.firstaid_input.text = ""
+        self.ids.firstaid_result.text = ""
+
+    def get_tip(self):
+        topic = self.ids.firstaid_input.text.strip().lower()
+        if not topic:
+            msg = "Please enter a first aid topic."
+            self.ids.firstaid_result.text = msg
+            speak(msg)
+            return
+
+        match = get_closest_match(topic, FIRSTAID_DB)
+        if match:
+            result = f"[b]Topic:[/b] {match.capitalize()}\n\n{FIRSTAID_DB[match]}"
+        else:
+            result = "No tips found for this topic. Please consult a first aid manual."
+        self.ids.firstaid_result.text = result
+        speak(result)
+
+    def voice_input(self):
+        self.ids.firstaid_result.text = "Listening..."
+        def run_listen():
+            text = listen()
+            def update_ui(dt):
+                if text:
+                    self.ids.firstaid_input.text = text
+                    self.get_tip()
+                else:
+                    msg = "Could not understand voice input. Please try again."
+                    self.ids.firstaid_result.text = msg
+                    speak(msg)
+            Clock.schedule_once(update_ui)
+        threading.Thread(target=run_listen, daemon=True).start()
+
+    def back_to_menu(self):
+        self.manager.current = 'menu'
+
+class BMIScreen(Screen):
+    def on_pre_enter(self):
+        self.ids.weight.text = ""
+        self.ids.height.text = ""
+        self.ids.bmi_result.text = ""
+
+    def calculate_bmi(self):
+        weight_text = self.ids.weight.text.strip()
+        height_text = self.ids.height.text.strip()
+
+        try:
+            weight = float(weight_text)
+            height_cm = float(height_text)
+            height_m = height_cm / 100
+            bmi = weight / (height_m ** 2)
+            bmi_str = f"{bmi:.2f}"
+            if bmi < 18.5:
+                status = "Underweight"
+            elif bmi < 25:
+                status = "Normal weight"
+            elif bmi < 30:
+                status = "Overweight"
+            else:
+                status = "Obese"
+
+            result = f"Your BMI is {bmi_str}. Status: {status}."
+            self.ids.bmi_result.text = result
+            speak(result)
+        except ValueError:
+            msg = "Please enter valid numeric weight and height."
+            self.ids.bmi_result.text = msg
+            speak(msg)
+
+    def back_to_menu(self):
+        self.manager.current = 'menu'
+
+class HealthTipsScreen(Screen):
+    def on_pre_enter(self):
+        self.ids.tips_label.text = "\n\n".join(HEALTH_TIPS)
+
+    def back_to_menu(self):
+        self.manager.current = 'menu'
+
+class EmergencyHelpScreen(Screen):
+    def call_emergency(self):
+        webbrowser.open("https://www.google.com/search?q=emergency+services+near+me")
+        speak("Calling emergency services.")
+
+    def back_to_menu(self):
+        self.manager.current = 'menu'
+
+class DisclaimerScreen(Screen):
+    def on_pre_enter(self):
+        self.ids.disclaimer_label.text = (
+            " This app is designed for informational purposes only."
+            "It does not replace professional doctors."
+            "Please use this app responsibly and consult a healthcare professional for any medical concerns."
+            "Your health and safety are our top priorities."
+        )
+
+    def back_to_menu(self):
+        self.manager.current = 'menu'
+
+class HealthAssistantApp(App):
+    user_age = None
+
+    def build(self):
+        return Builder.load_string(KV)
+
+KV = '''
+ScreenManager:
+    AgeVerificationScreen:
+    MenuScreen:
+    SymptomScreen:
+    MedicineScreen:
+    FirstAidScreen:
+    BMIScreen:
+    HealthTipsScreen:
+    EmergencyHelpScreen:
+    DisclaimerScreen:
+
+<AgeVerificationScreen>:
+    name: 'age'
+    BoxLayout:
+        orientation: 'vertical'
+        padding: dp(40)
+        spacing: dp(20)
+        size_hint: 0.6, 0.5
+        pos_hint: {"center_x": 0.5, "center_y": 0.5}
+
+        Label:
+            text: "Enter your age:"
+            font_size: '26sp'
+            size_hint_y: None
+            height: self.texture_size[1] + dp(10)
+
+        TextInput:
+            id: age_input
+            multiline: False
+            input_filter: 'int'
+            font_size: '20sp'
+            size_hint_y: None
+            height: dp(40)
+
+        Label:
+            id: age_warning
+            text: ""
+            color: (1,0,0,1)
+            font_size: '16sp'
+            size_hint_y: None
+            height: self.texture_size[1] + dp(10)
+
+        BoxLayout:
+            size_hint_y: None
+            height: dp(40)
+            spacing: dp(20)
+            padding: [dp(50), 0, dp(50), 0]
+            pos_hint: {"center_x": 0.5}
+            Button:
+                text: "Continue"
+                font_size: '18sp'
+                on_release: root.verify_age()
+
+<MenuScreen>:
+    name: 'menu'
+    BoxLayout:
+        orientation: 'vertical'
+        padding: dp(25)
+        spacing: dp(15)
+
+        Label:
+            text: "Health Assistant Menu"
+            font_size: '32sp'
+            size_hint_y: None
+            height: dp(70)
+            bold: True
+
+        ScrollView:
+            do_scroll_x: False
+            do_scroll_y: True
+
+            GridLayout:
+                cols: 1
+                size_hint_y: None
+                height: self.minimum_height
+                spacing: dp(12)
+
+                Button:
+                    text: "Symptom Checker"
+                    size_hint_y: None
+                    height: dp(50)
+                    font_size: '20sp'
+                    on_release: app.root.current = 'symptom'
+
+                Button:
+                    text: "Medicine Information"
+                    size_hint_y: None
+                    height: dp(50)
+                    font_size: '20sp'
+                    on_release: app.root.current = 'medicine'
+
+                Button:
+                    text: "First Aid Tips"
+                    size_hint_y: None
+                    height: dp(50)
+                    font_size: '20sp'
+                    on_release: app.root.current = 'firstaid'
+
+                Button:
+                    text: "BMI Calculator"
+                    size_hint_y: None
+                    height: dp(50)
+                    font_size: '20sp'
+                    on_release: app.root.current = 'bmi'
+
+                Button:
+                    text: "Health Tips"
+                    size_hint_y: None
+                    height: dp(50)
+                    font_size: '20sp'
+                    on_release: app.root.current = 'healthtips'
+
+                Button:
+                    text: "Emergency Help"
+                    size_hint_y: None
+                    height: dp(50)
+                    font_size: '20sp'
+                    on_release: app.root.current = 'emergency'
+
+                Button:
+                    text: "Disclaimer"
+                    size_hint_y: None
+                    height: dp(50)
+                    font_size: '20sp'
+                    on_release: app.root.current = 'disclaimer'
+
+                Button:
+                    text: "Exit"
+                    size_hint_y: None
+                    height: dp(50)
+                    font_size: '20sp'
+                    on_release: app.stop()
+
+<SymptomScreen>:
+    name: 'symptom'
+    BoxLayout:
+        orientation: 'vertical'
+        padding: dp(20)
+        spacing: dp(15)
+
+        Label:
+            text: "Symptom Checker"
+            font_size: '28sp'
+            size_hint_y: None
+            height: dp(50)
+            bold: True
+
+        TextInput:
+            id: symptom_input
+            multiline: False
+            font_size: '18sp'
+            size_hint_y: None
+            height: dp(40)
+            hint_text: "Enter symptom"
+
+        TextInput:
+            id: age_input
+            multiline: False
+            input_filter: 'int'
+            font_size: '18sp'
+            size_hint_y: None
+            height: dp(40)
+            hint_text: "Enter your age"
+
+        BoxLayout:
+            size_hint_y: None
+            height: dp(45)
+            spacing: dp(10)
+
+            Button:
+                text: "Check"
+                font_size: '18sp'
+                on_release: root.check_symptom()
+                
+            Button:
+                text: "Voice Input"
+                font_size: '18sp'
+                on_release: root.voice_input()
+
+            Button:
+                text: "Clear"
+                font_size: '18sp'
+                on_release:
+                    symptom_input.text = ""
+                    age_input.text = ""
+                    symptom_result.text = ""
+
+            Button:
+                text: "Back to Menu"
+                font_size: '18sp'
+                on_release: root.back_to_menu()
+
+        ScrollView:
+            size_hint: (1, None)
+            height: dp(250)
+
+            Label:
+                id: symptom_result
+                text: ""
+                markup: True
+                font_size: '18sp'
+                size_hint_y: None
+                height: self.texture_size[1]
+                text_size: self.width, None
+
+<MedicineScreen>:
+    name: 'medicine'
+    BoxLayout:
+        orientation: 'vertical'
+        padding: dp(20)
+        spacing: dp(15)
+
+        Label:
+            text: "Medicine Information"
+            font_size: '28sp'
+            size_hint_y: None
+            height: dp(50)
+            bold: True
+
+        TextInput:
+            id: medicine_input
+            multiline: False
+            font_size: '18sp'
+            size_hint_y: None
+            height: dp(40)
+            hint_text: "Enter medicine name"
+
+        TextInput:
+            id: age_input
+            multiline: False
+            input_filter: 'int'
+            font_size: '18sp'
+            size_hint_y: None
+            height: dp(40)
+            hint_text: "Enter your age"
+
+        BoxLayout:
+            size_hint_y: None
+            height: dp(45)
+            spacing: dp(10)
+
+            Button:
+                text: "Check"
+                font_size: '18sp'
+                on_release: root.check_medicine()
+
+            Button:
+                text: "Voice Input"
+                font_size: '18sp'
+                on_release: root.voice_input()
+
+            Button:
+                text: "Clear"
+                font_size: '18sp'
+                on_release:
+                    medicine_input.text = ""
+                    age_input.text = ""
+                    medicine_result.text = ""
+
+            Button:
+                text: "Back to Menu"
+                font_size: '18sp'
+                on_release: root.back_to_menu()
+
+        ScrollView:
+            size_hint: (1, None)
+            height: dp(250)
+
+            Label:
+                id: medicine_result
+                text: ""
+                markup: True
+                font_size: '18sp'
+                size_hint_y: None
+                height: self.texture_size[1]
+                text_size: self.width, None
+
+<FirstAidScreen>:
+    name: 'firstaid'
+    BoxLayout:
+        orientation: 'vertical'
+        padding: dp(20)
+        spacing: dp(15)
+
+        Label:
+            text: "First Aid Tips"
+            font_size: '28sp'
+            size_hint_y: None
+            height: dp(50)
+            bold: True
+
+        TextInput:
+            id: firstaid_input
+            multiline: False
+            font_size: '18sp'
+            size_hint_y: None
+            height: dp(40)
+            hint_text: "Enter first aid topic (e.g., cut, burn)"
+
+        BoxLayout:
+            size_hint_y: None
+            height: dp(45)
+            spacing: dp(10)
+
+            Button:
+                text: "Get Tips"
+                font_size: '18sp'
+                on_release: root.get_tip()
+
+            Button:
+                text: "Voice Input"
+                font_size: '18sp'
+                on_release: root.voice_input()
+
+            Button:
+                text: "Clear"
+                font_size: '18sp'
+                on_release:
+                    firstaid_input.text = ""
+                    firstaid_result.text = ""
+
+            Button:
+                text: "Back to Menu"
+                font_size: '18sp'
+                on_release: root.back_to_menu()
+
+        ScrollView:
+            size_hint: (1, None)
+            height: dp(250)
+
+            Label:
+                id: firstaid_result
+                text: ""
+                markup: True
+                font_size: '18sp'
+                size_hint_y: None
+                height: self.texture_size[1]
+                text_size: self.width, None
+
+<BMIScreen>:
+    name: 'bmi'
+    BoxLayout:
+        orientation: 'vertical'
+        padding: dp(20)
+        spacing: dp(15)
+
+        Label:
+            text: "BMI Calculator"
+            font_size: '28sp'
+            size_hint_y: None
+            height: dp(50)
+            bold: True
+
+        TextInput:
+            id: weight
+            multiline: False
+            input_filter: 'float'
+            font_size: '18sp'
+            size_hint_y: None
+            height: dp(40)
+            hint_text: "Enter weight in kg"
+
+        TextInput:
+            id: height
+            multiline: False
+            input_filter: 'float'
+            font_size: '18sp'
+            size_hint_y: None
+            height: dp(40)
+            hint_text: "Enter height in cm"
+
+        BoxLayout:
+            size_hint_y: None
+            height: dp(45)
+            spacing: dp(10)
+
+            Button:
+                text: "Calculate"
+                font_size: '18sp'
+                on_release: root.calculate_bmi()
+
+            Button:
+                text: "Clear"
+                font_size: '18sp'
+                on_release:
+                    weight.text = ""
+                    height.text = ""
+                    bmi_result.text = ""
+
+            Button:
+                text: "Back to Menu"
+                font_size: '18sp'
+                on_release: root.back_to_menu()
+
+        Label:
+            id: bmi_result
+            text: ""
+            font_size: '18sp'
+            markup: True
+            halign: 'center'
+            valign: 'middle'
+            size_hint_y: None
+            height: dp(100)
+            text_size: self.width, None
+
+<HealthTipsScreen>:
+    name: 'healthtips'
+    BoxLayout:
+        orientation: 'vertical'
+        padding: dp(20)
+        spacing: dp(15)
+
+        Label:
+            text: "Health Tips"
+            font_size: '28sp'
+            size_hint_y: None
+            height: dp(50)
+            bold: True
+
+        ScrollView:
+            Label:
+                id: tips_label
+                text: ""
+                font_size: '18sp'
+                markup: True
+                size_hint_y: None
+                height: self.texture_size[1]
+                text_size: self.width, None
+
+        Button:
+            size_hint_y: None
+            height: dp(45)
+            text: "Back to Menu"
+            font_size: '18sp'
+            on_release: root.back_to_menu()
+
+<EmergencyHelpScreen>:
+    name: 'emergency'
+    BoxLayout:
+        orientation: 'vertical'
+        padding: dp(20)
+        spacing: dp(20)
+        pos_hint: {"center_x": 0.5, "center_y": 0.5}
+
+        Label:
+            text: "Emergency Help"
+            font_size: '28sp'
+            size_hint_y: None
+            height: dp(50)
+            bold: True
+
+        Label:
+            text: "In case of emergency, press the button below to call emergency services."
+            font_size: '18sp'
+            halign: 'center'
+            valign: 'middle'
+            size_hint_y: None
+            height: dp(60)
+            text_size: self.width, None
+
+        Button:
+            text: "Call Emergency Services"
+            font_size: '20sp'
+            size_hint: (0.7, None)
+            height: dp(50)
+            pos_hint: {"center_x": 0.5}
+            on_release: root.call_emergency()
+
+        Button:
+            text: "Back to Menu"
+            font_size: '18sp'
+            size_hint_y: None
+            height: dp(45)
+            on_release: root.back_to_menu()
+
+<DisclaimerScreen>:
+    name: 'disclaimer'
+    BoxLayout:
+        orientation: 'vertical'
+        padding: dp(20)
+        spacing: dp(20)
+
+        Label:
+            id: disclaimer_label
+            text: ""
+            font_size: '18sp'
+            markup: True
+            halign: 'center'
+            valign: 'middle'
+            size_hint_y: None
+            height: self.texture_size[1] + dp(20)
+            text_size: self.width, None
+
+        Button:
+            text: "Back to Menu"
+            font_size: '18sp'
+            size_hint_y: None
+            height: dp(45)
+            on_release: root.back_to_menu()
+'''
+
+if __name__ == '__main__':
+    HealthAssistantApp().run()
